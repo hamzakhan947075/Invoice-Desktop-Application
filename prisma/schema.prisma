@@ -1,0 +1,434 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum Currency {
+  PKR
+  USD
+  EUR
+  GBP
+  AUD
+  NZD
+  AED
+  SAR
+  CNY
+}
+
+enum ProductType {
+  PRODUCT
+  SERVICE
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CASH
+  BANK_TRANSFER
+  CREDIT_CARD
+  DEBIT_CARD
+  JAZZCASH
+  EASYPAISA
+  OTHER
+}
+
+enum RecurringFrequency {
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+enum RecurringInvoiceStatus {
+  ACTIVE
+  PAUSED
+  CANCELLED
+  COMPLETED
+}
+
+enum QuoteStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  REJECTED
+  EXPIRED
+  CONVERTED
+}
+
+enum ExpenseCategory {
+  OFFICE_SUPPLIES
+  TRAVEL
+  UTILITIES
+  RENT
+  SOFTWARE
+  MARKETING
+  PROFESSIONAL_SERVICES
+  OTHER
+}
+
+enum StockMovementType {
+  INCREASE
+  DECREASE
+}
+
+// Single local business per install — this is a desktop app, not a
+// multi-tenant SaaS, so there is no User/login model. requireCurrentBusiness()
+// auto-creates this row on first run (see src/lib/auth/current-user.ts).
+model Business {
+  id       String   @id @default(cuid())
+  name     String
+  logoUrl  String?
+  email    String?
+  phone    String?
+  address  String?
+  currency Currency @default(PKR)
+
+  customers         Customer[]
+  products          Product[]
+  invoices          Invoice[]
+  payments          Payment[]
+  recurringInvoices RecurringInvoice[]
+  quotes            Quote[]
+  creditNotes       CreditNote[]
+  expenses          Expense[]
+  stockMovements    StockMovement[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("businesses")
+}
+
+model Customer {
+  id      String  @id @default(cuid())
+  name    String
+  email   String?
+  phone   String?
+  address String?
+  notes   String?
+
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  invoices          Invoice[]
+  recurringInvoices RecurringInvoice[]
+  quotes            Quote[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessId])
+  @@map("customers")
+}
+
+model Product {
+  id          String      @id @default(cuid())
+  name        String
+  sku         String?
+  description String?
+  type        ProductType @default(PRODUCT)
+  price       Decimal
+  taxRate     Decimal     @default(0)
+  isActive    Boolean     @default(true)
+
+  // Inventory (Phase 20) — only meaningful for type = PRODUCT. Stock is
+  // adjusted only via explicit "Adjust Stock" actions (logged as
+  // StockMovements), never automatically by invoicing — see README.
+  trackInventory Boolean @default(false)
+  stockQuantity  Decimal @default(0)
+  reorderLevel   Decimal @default(0)
+
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  invoiceItems          InvoiceItem[]
+  recurringInvoiceItems RecurringInvoiceItem[]
+  quoteItems            QuoteItem[]
+  stockMovements        StockMovement[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessId])
+  @@map("products")
+}
+
+model Invoice {
+  id            String        @id @default(cuid())
+  invoiceNumber String
+  issueDate     DateTime
+  dueDate       DateTime
+  status        InvoiceStatus @default(DRAFT)
+  currency      Currency      @default(PKR)
+
+  // All money fields use fixed-precision Decimal — never floating point.
+  subtotal   Decimal @default(0)
+  discount   Decimal @default(0)
+  tax        Decimal @default(0)
+  total      Decimal @default(0)
+  amountPaid Decimal @default(0)
+  balanceDue Decimal @default(0)
+
+  notes String?
+
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+
+  // Set when this invoice was auto-generated from a recurring template.
+  // SetNull on delete — deleting the template must never delete invoices it already produced.
+  recurringInvoiceId String?
+  recurringInvoice   RecurringInvoice? @relation(fields: [recurringInvoiceId], references: [id], onDelete: SetNull)
+
+  items       InvoiceItem[]
+  payments    Payment[]
+  creditNotes CreditNote[]
+  // Back-reference for the Quote this invoice was converted from, if any.
+  // No `fields`/`references` here — the FK lives on Quote.convertedInvoiceId.
+  sourceQuote Quote?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([businessId, invoiceNumber])
+  @@index([businessId])
+  @@index([customerId])
+  @@index([recurringInvoiceId])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id          String  @id @default(cuid())
+  description String
+  quantity    Decimal
+  unitPrice   Decimal
+  taxRate     Decimal @default(0)
+  discount    Decimal @default(0)
+  lineTotal   Decimal
+
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  productId String?
+  product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([invoiceId])
+  @@map("invoice_items")
+}
+
+model Payment {
+  id            String        @id @default(cuid())
+  amount        Decimal
+  paymentDate   DateTime
+  paymentMethod PaymentMethod
+  reference     String?
+  notes         String?
+
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  // Denormalized for tenant-isolation queries that shouldn't need to join through Invoice.
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([invoiceId])
+  @@index([businessId])
+  @@map("payments")
+}
+
+// A template that generates real Invoices on a schedule. No money math or
+// tenant logic is duplicated here — generation reuses the same
+// calculateInvoiceTotals()/generateInvoiceNumber() as manual invoice creation.
+model RecurringInvoice {
+  id        String                 @id @default(cuid())
+  frequency RecurringFrequency
+  status    RecurringInvoiceStatus @default(ACTIVE)
+  currency  Currency               @default(PKR)
+
+  startDate       DateTime
+  endDate         DateTime?
+  // Date the next invoice is due to be generated. Advanced by `frequency`
+  // each time an invoice is generated, whether by cron or "Generate Now".
+  nextRunDate     DateTime
+  lastGeneratedAt DateTime?
+  // Days after generation's issueDate that the generated invoice's dueDate falls on.
+  dueInDays       Int       @default(14)
+
+  notes String?
+
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+
+  items             RecurringInvoiceItem[]
+  generatedInvoices Invoice[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessId])
+  @@index([customerId])
+  @@index([status, nextRunDate])
+  @@map("recurring_invoices")
+}
+
+model RecurringInvoiceItem {
+  id          String  @id @default(cuid())
+  description String
+  quantity    Decimal
+  unitPrice   Decimal
+  taxRate     Decimal @default(0)
+  discount    Decimal @default(0)
+
+  recurringInvoiceId String
+  recurringInvoice   RecurringInvoice @relation(fields: [recurringInvoiceId], references: [id], onDelete: Cascade)
+
+  productId String?
+  product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([recurringInvoiceId])
+  @@map("recurring_invoice_items")
+}
+
+// Phase 17 — a non-binding estimate. Converting one to an invoice creates a
+// real Invoice via the same createInvoiceAction path (recalculated, DRAFT),
+// and stamps convertedInvoiceId so the quote can't be converted twice.
+model Quote {
+  id          String      @id @default(cuid())
+  quoteNumber String
+  issueDate   DateTime
+  expiryDate  DateTime
+  status      QuoteStatus @default(DRAFT)
+  currency    Currency    @default(PKR)
+
+  subtotal Decimal @default(0)
+  discount Decimal @default(0)
+  tax      Decimal @default(0)
+  total    Decimal @default(0)
+
+  notes String?
+
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+
+  items QuoteItem[]
+
+  convertedInvoiceId String?  @unique
+  convertedInvoice   Invoice? @relation(fields: [convertedInvoiceId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([businessId, quoteNumber])
+  @@index([businessId])
+  @@index([customerId])
+  @@map("quotes")
+}
+
+model QuoteItem {
+  id          String  @id @default(cuid())
+  description String
+  quantity    Decimal
+  unitPrice   Decimal
+  taxRate     Decimal @default(0)
+  discount    Decimal @default(0)
+  lineTotal   Decimal
+
+  quoteId String
+  quote   Quote  @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  productId String?
+  product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([quoteId])
+  @@map("quote_items")
+}
+
+// Phase 18 — issued against an invoice to write off part of its balance
+// (a refund, a billing correction) without ever mutating the invoice's
+// original `total`, which must stay the historical amount actually billed.
+model CreditNote {
+  id               String   @id @default(cuid())
+  creditNoteNumber String
+  issueDate        DateTime
+  amount           Decimal
+  reason           String
+
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([businessId, creditNoteNumber])
+  @@index([businessId])
+  @@index([invoiceId])
+  @@map("credit_notes")
+}
+
+// Phase 19 — simple expense tracking, deliberately not tied to invoicing.
+model Expense {
+  id          String          @id @default(cuid())
+  category    ExpenseCategory @default(OTHER)
+  description String
+  vendor      String?
+  amount      Decimal
+  expenseDate DateTime
+  notes       String?
+
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessId])
+  @@index([businessId, expenseDate])
+  @@map("expenses")
+}
+
+// Phase 20 — an audit ledger of manual stock adjustments. Product.stockQuantity
+// is the current balance; every change to it is logged here with a reason.
+model StockMovement {
+  id       String            @id @default(cuid())
+  type     StockMovementType
+  quantity Decimal
+  reason   String?
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([productId])
+  @@index([businessId])
+  @@map("stock_movements")
+}
