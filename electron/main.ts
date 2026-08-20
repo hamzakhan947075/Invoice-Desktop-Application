@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog } from "electron";
+import { app, BrowserWindow, dialog, Menu, Tray, nativeImage, ipcMain, type MenuItemConstructorOptions } from "electron";
 import { autoUpdater } from "electron-updater";
 import { spawn, type ChildProcess } from "child_process";
 import path from "path";
@@ -19,6 +19,11 @@ const PROD_PORT = 47890;
 
 let serverProcess: ChildProcess | null = null;
 let mainWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
+let baseUrl: string | null = null;
+// Closing the window minimizes to tray; only the tray/menu "Quit" item (or a
+// real OS shutdown, via before-quit) should let the window actually close.
+let isQuitting = false;
 
 function logFatal(message: string) {
   try {
@@ -210,13 +215,12 @@ async function checkRecurringInvoices(baseUrl: string, cronSecret: string) {
 }
 
 /**
- * Checks GitHub Releases for a newer version and, if the user accepts,
- * downloads and installs it on quit. Every step is best-effort — no
- * internet, no releases published yet, or a network hiccup should never
- * be treated as a startup failure.
+ * Registered once at startup. Both the silent startup check and the
+ * Settings page's manual "Check for updates" button (via IPC, below) share
+ * these same 'error'/'update-downloaded' listeners — only the trigger differs.
  */
-function checkForUpdates() {
-  autoUpdater.on("error", (error) => logFatal(`Auto-update check failed: ${error.message}`));
+function setupAutoUpdater() {
+  autoUpdater.on("error", (error) => logFatal(`Auto-update error: ${error.message}`));
   autoUpdater.on("update-downloaded", async (info) => {
     const { response } = await dialog.showMessageBox({
       type: "info",
@@ -228,20 +232,145 @@ function checkForUpdates() {
     });
     if (response === 0) autoUpdater.quitAndInstall();
   });
+}
 
+/** Silent, best-effort check run once on every launch — never treated as a startup failure. */
+function checkForUpdatesOnStartup() {
   autoUpdater.checkForUpdatesAndNotify().catch((error) => {
     logFatal(`Auto-update check failed: ${error instanceof Error ? error.message : String(error)}`);
   });
 }
 
+async function performUpdateCheck(): Promise<{ status: string; message: string }> {
+  if (!app.isPackaged) {
+    return { status: "dev", message: "Update checks only run in the installed app." };
+  }
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    const latestVersion = result?.updateInfo?.version;
+    if (latestVersion && latestVersion !== app.getVersion()) {
+      return { status: "available", message: `Version ${latestVersion} is downloading now.` };
+    }
+    return { status: "up-to-date", message: "You're on the latest version." };
+  } catch (error) {
+    return { status: "error", message: error instanceof Error ? error.message : "Update check failed." };
+  }
+}
+
+ipcMain.handle("get-app-version", () => app.getVersion());
+ipcMain.handle("check-for-updates", () => performUpdateCheck());
+
+function navigateTo(pagePath: string) {
+  if (!mainWindow || !baseUrl) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+  mainWindow.loadURL(`${baseUrl}${pagePath}`);
+}
+
+function buildAppMenu() {
+  const isMac = process.platform === "darwin";
+
+  const template: MenuItemConstructorOptions[] = [
+    ...(isMac ? [{ role: "appMenu" as const }] : []),
+    {
+      label: "File",
+      submenu: [
+        { label: "New Invoice", accelerator: "CmdOrCtrl+N", click: () => navigateTo("/invoices/new") },
+        { label: "New Customer", click: () => navigateTo("/customers") },
+        { label: "New Product", click: () => navigateTo("/products") },
+        { type: "separator" },
+        { label: "Settings", accelerator: "CmdOrCtrl+,", click: () => navigateTo("/settings") },
+        { type: "separator" },
+        isMac ? { role: "close" } : { label: "Quit", accelerator: "CmdOrCtrl+Q", click: () => app.quit() },
+      ],
+    },
+    { role: "editMenu" },
+    {
+      label: "View",
+      submenu: [
+        { role: "reload" },
+        { role: "toggleDevTools" },
+        { type: "separator" },
+        { role: "resetZoom" },
+        { role: "zoomIn" },
+        { role: "zoomOut" },
+        { type: "separator" },
+        { role: "togglefullscreen" },
+      ],
+    },
+    {
+      label: "Help",
+      submenu: [
+        {
+          label: "Check for Updates…",
+          click: async () => {
+            const result = await performUpdateCheck();
+            dialog.showMessageBox({ type: "info", title: "InvoiceFlow updates", message: result.message });
+          },
+        },
+        {
+          label: "About InvoiceFlow",
+          click: () =>
+            dialog.showMessageBox({
+              type: "info",
+              title: "About InvoiceFlow",
+              message: "InvoiceFlow",
+              detail: `Version ${app.getVersion()}`,
+            }),
+        },
+      ],
+    },
+  ];
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+function createTray() {
+  const iconPath = getResourcePath("build-resources", "icon.png");
+  if (!fs.existsSync(iconPath)) return; // best-effort — a missing icon shouldn't block startup.
+
+  const icon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 });
+  tray = new Tray(icon);
+  tray.setToolTip("InvoiceFlow");
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: "Open InvoiceFlow", click: () => navigateTo("/") },
+      { label: "New Invoice", click: () => navigateTo("/invoices/new") },
+      { type: "separator" },
+      {
+        label: "Quit",
+        click: () => {
+          isQuitting = true;
+          app.quit();
+        },
+      },
+    ])
+  );
+  tray.on("click", () => navigateTo("/"));
+}
+
 async function createWindow(url: string) {
+  baseUrl = url;
   mainWindow = new BrowserWindow({
     width: 1360,
     height: 900,
     show: false,
     webPreferences: {
       contextIsolation: true,
+      preload: path.join(__dirname, "preload.js"),
     },
+  });
+
+  // Minimize to tray instead of quitting — but only if a tray icon actually
+  // exists to bring the window back; otherwise hiding it would leave no way
+  // to reopen it. Only Quit (menu, tray, or a real OS shutdown) sets
+  // isQuitting first.
+  mainWindow.on("close", (event) => {
+    if (!isQuitting && tray) {
+      event.preventDefault();
+      mainWindow?.hide();
+    }
   });
 
   await mainWindow.loadURL(url);
@@ -251,11 +380,15 @@ async function createWindow(url: string) {
 if (gotLock) {
   app.whenReady().then(async () => {
     try {
+      buildAppMenu();
+      createTray();
+      setupAutoUpdater();
+
       if (app.isPackaged) {
         const url = await startPackagedServer();
         await createWindow(url);
         await checkRecurringInvoices(url, "invoiceflow-local-cron");
-        checkForUpdates();
+        checkForUpdatesOnStartup();
       } else {
         const url = `http://127.0.0.1:${DEV_PORT}`;
         await waitForServer(url, 30000);
@@ -269,11 +402,15 @@ if (gotLock) {
   });
 }
 
+// window-all-closed no longer means quit: closing the window hides it to
+// the tray (see the "close" handler in createWindow). This only fires once
+// the window is truly destroyed, which now only happens during quit itself.
 app.on("window-all-closed", () => {
-  app.quit();
+  if (process.platform !== "darwin") app.quit();
 });
 
 app.on("before-quit", () => {
+  isQuitting = true;
   serverProcess?.kill();
 });
 

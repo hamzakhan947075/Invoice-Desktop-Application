@@ -15,10 +15,10 @@
     "lint": "eslint",
     "test": "vitest run",
     "electron:dev:next": "next dev -p 5175",
-    "electron:dev:main": "tsup electron/main.ts --outDir dist-electron --format cjs --external electron --watch --onSuccess \"electron .\"",
+    "electron:dev:main": "tsup electron/main.ts electron/preload.ts --outDir dist-electron --format cjs --external electron --watch --onSuccess \"electron .\"",
     "electron:dev": "concurrently -k \"npm:electron:dev:next\" \"wait-on http://127.0.0.1:5175 && npm:electron:dev:main\"",
     "electron:build:next": "next build && node scripts/copy-standalone-assets.mjs",
-    "electron:build:main": "tsup electron/main.ts --outDir dist-electron --format cjs --external electron",
+    "electron:build:main": "tsup electron/main.ts electron/preload.ts --outDir dist-electron --format cjs --external electron",
     "electron:pack": "npm run electron:build:next && npm run electron:build:main && electron-builder",
     "electron:pack:win": "npm run electron:build:next && npm run electron:build:main && electron-builder --win",
     "electron:pack:mac": "npm run electron:build:next && npm run electron:build:main && electron-builder --mac",
@@ -54,6 +54,10 @@
       {
         "from": "prisma/migrations",
         "to": "prisma/migrations"
+      },
+      {
+        "from": "build-resources",
+        "to": "build-resources"
       }
     ],
     "asarUnpack": [

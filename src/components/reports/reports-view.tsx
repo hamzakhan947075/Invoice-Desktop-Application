@@ -76,10 +76,13 @@ export function ReportsView({
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {cards.map(({ label, icon: Icon, value }) => (
-          <Card key={label}>
+          <Card
+            key={label}
+            className="transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
+          >
             <CardHeader className="flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">{label}</CardTitle>
-              <Icon className="h-4 w-4 text-muted-foreground" />
+              <Icon className="h-4 w-4 text-primary" />
             </CardHeader>
             <CardContent>
               <p className="text-2xl font-semibold">{formatMoney(value, currency)}</p>

@@ -15,6 +15,7 @@ import {
 import { SearchInput } from "@/components/shared/search-input";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ExportCsvButton } from "@/components/shared/export-csv-button";
+import { ImportCsvButton } from "@/components/shared/import-csv-button";
 import { formatMoney } from "@/lib/format";
 import type { CurrencyCode } from "@/lib/currencies";
 import { CustomerFormDialog, type CustomerRecord } from "@/components/customers/customer-form-dialog";
@@ -43,6 +44,7 @@ export function CustomersView({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <SearchInput placeholder="Search customers…" defaultValue={searchQuery} />
         <div className="flex items-center gap-2">
+          <ImportCsvButton action="/api/import/customers" />
           <ExportCsvButton href="/api/export/customers" />
           <Button onClick={() => setAddOpen(true)}>
             <Plus className="h-4 w-4" />

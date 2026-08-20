@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/table";
 import { SearchInput } from "@/components/shared/search-input";
 import { ExportCsvButton } from "@/components/shared/export-csv-button";
+import { ImportCsvButton } from "@/components/shared/import-csv-button";
 import { EmptyState } from "@/components/shared/empty-state";
 import { formatMoney } from "@/lib/format";
 import type { CurrencyCode } from "@/lib/currencies";
@@ -40,6 +41,7 @@ export function ProductsView({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <SearchInput placeholder="Search products & services…" defaultValue={searchQuery} />
         <div className="flex items-center gap-2">
+          <ImportCsvButton action="/api/import/products" />
           <ExportCsvButton href="/api/export/products" />
           <Button onClick={() => setAddOpen(true)}>
             <Plus className="h-4 w-4" />

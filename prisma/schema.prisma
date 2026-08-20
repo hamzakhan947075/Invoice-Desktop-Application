@@ -97,6 +97,10 @@ model Business {
   address  String?
   currency Currency @default(PKR)
 
+  // Optional local screen-lock PIN (salt:hash, see src/lib/pin.ts) — a
+  // deterrent for a shared PC, not real encryption-at-rest for the db file.
+  pinHash String?
+
   customers         Customer[]
   products          Product[]
   invoices          Invoice[]

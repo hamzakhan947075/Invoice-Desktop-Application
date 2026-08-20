@@ -8,6 +8,7 @@ import { requireCurrentBusiness } from "@/lib/auth/current-user";
 import { prisma } from "@/lib/prisma";
 import { businessProfileSchema } from "@/lib/validations/business";
 import { getUploadsRoot } from "@/lib/uploads";
+import { hashPin, verifyPin } from "@/lib/pin";
 
 export type BusinessProfileActionState = { error?: string; success?: boolean } | undefined;
 
@@ -102,6 +103,70 @@ export async function updateBusinessProfileAction(
     },
   });
 
+  revalidatePath("/settings");
+  return { success: true };
+}
+
+export type PinActionState = { error?: string; success?: boolean } | undefined;
+
+const PIN_PATTERN = /^\d{4,8}$/;
+
+export async function setPinAction(
+  _prevState: PinActionState,
+  formData: FormData
+): Promise<PinActionState> {
+  const business = await requireCurrentBusiness();
+  const pin = formData.get("pin");
+  const confirmPin = formData.get("confirmPin");
+
+  if (typeof pin !== "string" || !PIN_PATTERN.test(pin)) {
+    return { error: "PIN must be 4–8 digits." };
+  }
+  if (pin !== confirmPin) {
+    return { error: "PINs don't match." };
+  }
+
+  await prisma.business.update({ where: { id: business.id }, data: { pinHash: hashPin(pin) } });
+  revalidatePath("/settings");
+  return { success: true };
+}
+
+export async function changePinAction(
+  _prevState: PinActionState,
+  formData: FormData
+): Promise<PinActionState> {
+  const business = await requireCurrentBusiness();
+  const currentPin = formData.get("currentPin");
+  const newPin = formData.get("newPin");
+  const confirmPin = formData.get("confirmPin");
+
+  if (!business.pinHash || typeof currentPin !== "string" || !verifyPin(currentPin, business.pinHash)) {
+    return { error: "Current PIN is incorrect." };
+  }
+  if (typeof newPin !== "string" || !PIN_PATTERN.test(newPin)) {
+    return { error: "New PIN must be 4–8 digits." };
+  }
+  if (newPin !== confirmPin) {
+    return { error: "PINs don't match." };
+  }
+
+  await prisma.business.update({ where: { id: business.id }, data: { pinHash: hashPin(newPin) } });
+  revalidatePath("/settings");
+  return { success: true };
+}
+
+export async function removePinAction(
+  _prevState: PinActionState,
+  formData: FormData
+): Promise<PinActionState> {
+  const business = await requireCurrentBusiness();
+  const currentPin = formData.get("currentPin");
+
+  if (!business.pinHash || typeof currentPin !== "string" || !verifyPin(currentPin, business.pinHash)) {
+    return { error: "Current PIN is incorrect." };
+  }
+
+  await prisma.business.update({ where: { id: business.id }, data: { pinHash: null } });
   revalidatePath("/settings");
   return { success: true };
 }
