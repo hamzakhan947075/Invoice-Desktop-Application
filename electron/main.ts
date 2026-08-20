@@ -3,6 +3,7 @@ import { spawn, type ChildProcess } from "child_process";
 import path from "path";
 import fs from "fs";
 import http from "http";
+import net from "net";
 import { runMigrations } from "./migrate";
 
 // A second launch should just focus the existing window, not spawn a
@@ -27,6 +28,19 @@ function logFatal(message: string) {
     // Best-effort only — never let logging itself crash startup.
   }
 }
+
+// A crash anywhere outside the main startup try/catch (e.g. an unhandled
+// 'error' event on the spawned server's ChildProcess) would otherwise throw
+// and take the whole process down with no dialog and no log — exactly what
+// "the app just closes" looks like from the outside. This is the last resort.
+process.on("uncaughtException", (error) => {
+  logFatal(`Uncaught exception: ${error instanceof Error ? error.stack : String(error)}`);
+  try {
+    dialog.showErrorBox("InvoiceFlow crashed", String(error));
+  } catch {
+    // dialog may not be available this early/late in shutdown — nothing more we can do.
+  }
+});
 
 /** Centralizes the dev-vs-packaged path branching flagged as an easy-to-miss bug class. */
 function getResourcePath(...segments: string[]): string {
@@ -54,6 +68,24 @@ function waitForServer(url: string, timeoutMs = 15000): Promise<void> {
   });
 }
 
+/** Checks whether a local TCP port is free by briefly binding to it. */
+function isPortFree(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const tester = net.createServer();
+    tester.once("error", () => resolve(false));
+    tester.once("listening", () => tester.close(() => resolve(true)));
+    tester.listen(port, "127.0.0.1");
+  });
+}
+
+/** Finds a free port at or after `startPort`, so a machine with something already bound to the default doesn't crash-loop trying to reuse it. */
+async function findFreePort(startPort: number, maxAttempts = 20): Promise<number> {
+  for (let port = startPort; port < startPort + maxAttempts; port++) {
+    if (await isPortFree(port)) return port;
+  }
+  throw new Error(`No free port found in range ${startPort}-${startPort + maxAttempts}`);
+}
+
 async function startPackagedServer(): Promise<string> {
   const userData = app.getPath("userData");
   const dataDir = path.join(userData, "data");
@@ -64,38 +96,71 @@ async function startPackagedServer(): Promise<string> {
   const uploadsDir = path.join(userData, "uploads");
   fs.mkdirSync(uploadsDir, { recursive: true });
 
+  // A restore uploaded via Settings is staged here (the live db file can't
+  // be overwritten while this process has it open, especially on Windows) —
+  // swap it in now, before anything opens the real db file for this launch.
+  const pendingRestorePath = path.join(dataDir, "restore-pending.db");
+  if (fs.existsSync(pendingRestorePath)) {
+    if (fs.existsSync(dbPath)) {
+      const backupPath = path.join(dataDir, `pre-restore-${Date.now()}.db`);
+      fs.renameSync(dbPath, backupPath);
+      logFatal(`Restoring backup: previous database saved to ${backupPath}`);
+    }
+    fs.renameSync(pendingRestorePath, dbPath);
+    for (const suffix of ["-wal", "-shm"]) {
+      try {
+        fs.unlinkSync(dbPath + suffix);
+      } catch {
+        // No WAL/SHM sidecar file to remove — fine.
+      }
+    }
+  }
+
   const migrationsDir = getResourcePath("prisma", "migrations");
   await runMigrations(databaseUrl, migrationsDir);
 
   const serverEntry = getResourcePath("standalone", "server.js");
-  const port = PROD_PORT;
+  if (!fs.existsSync(serverEntry)) {
+    throw new Error(`Server entry not found at ${serverEntry}`);
+  }
 
-  serverProcess = spawn(process.execPath, [serverEntry], {
-    env: {
-      ...process.env,
-      DATABASE_URL: databaseUrl,
-      UPLOADS_DIR: uploadsDir,
-      CRON_SECRET: "invoiceflow-local-cron",
-      PORT: String(port),
-      HOSTNAME: "127.0.0.1",
-      NODE_ENV: "production",
-      ELECTRON_RUN_AS_NODE: "1",
-    },
-    stdio: ["ignore", "pipe", "pipe"],
+  const port = await findFreePort(PROD_PORT);
+
+  return new Promise<string>((resolve, reject) => {
+    serverProcess = spawn(process.execPath, [serverEntry], {
+      env: {
+        ...process.env,
+        DATABASE_URL: databaseUrl,
+        UPLOADS_DIR: uploadsDir,
+        CRON_SECRET: "invoiceflow-local-cron",
+        PORT: String(port),
+        HOSTNAME: "127.0.0.1",
+        NODE_ENV: "production",
+        ELECTRON_RUN_AS_NODE: "1",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    // Without this handler, a spawn failure (e.g. the exe missing/blocked)
+    // fires an unhandled 'error' event that throws and kills the whole
+    // Electron process with no dialog and no log.
+    serverProcess.on("error", (error) => {
+      logFatal(`Failed to spawn server process: ${error.stack ?? error.message}`);
+      reject(error);
+    });
+
+    serverProcess.stdout?.on("data", (chunk) => logFatal(`[server stdout] ${chunk}`));
+    serverProcess.stderr?.on("data", (chunk) => logFatal(`[server stderr] ${chunk}`));
+    serverProcess.on("exit", (code) => {
+      if (code !== 0 && code !== null) {
+        logFatal(`Server process exited with code ${code}`);
+        reject(new Error(`Server process exited unexpectedly (code ${code}). See startup-error.log.`));
+      }
+    });
+
+    const url = `http://127.0.0.1:${port}`;
+    waitForServer(url).then(() => resolve(url), reject);
   });
-
-  serverProcess.stdout?.on("data", (chunk) => logFatal(`[server stdout] ${chunk}`));
-  serverProcess.stderr?.on("data", (chunk) => logFatal(`[server stderr] ${chunk}`));
-  serverProcess.on("exit", (code) => {
-    if (code !== 0 && code !== null) {
-      logFatal(`Server process exited with code ${code}`);
-      dialog.showErrorBox("InvoiceFlow", `The application server exited unexpectedly (code ${code}).`);
-    }
-  });
-
-  const url = `http://127.0.0.1:${port}`;
-  await waitForServer(url);
-  return url;
 }
 
 async function checkRecurringInvoices(baseUrl: string, cronSecret: string) {

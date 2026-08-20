@@ -1,4 +1,5 @@
 import path from "path";
+import { pathToFileURL } from "url";
 
 /**
  * Root directory for runtime-written uploads (business logos, etc).
@@ -14,10 +15,23 @@ export function getUploadsRoot(): string {
 
 const UPLOADS_URL_PREFIX = "/api/uploads/";
 
-/** Resolves a stored `logoUrl` (e.g. `/api/uploads/businesses/<id>/<file>`) to an absolute filesystem path, for feeding into `@react-pdf/renderer`'s `<Image>`. */
+/**
+ * Resolves a stored `logoUrl` (e.g. `/api/uploads/businesses/<id>/<file>`) to
+ * a `file://` URL, for feeding into `@react-pdf/renderer`'s `<Image>`.
+ *
+ * `<Image>` tries `fetch()` on whatever `src` it's given — a bare filesystem
+ * path (no protocol) fails that fetch silently and the image just doesn't
+ * render, with no error. `pathToFileURL` gives it something `fetch()` (and
+ * Node generally) actually understands, including correct escaping if a
+ * path ever contains characters like spaces.
+ */
 export function resolveUploadPath(url: string): string {
   // The uploads root comes from an env var, not a literal path Next's file
   // tracer can follow statically — without this, `output: "standalone"`
   // conservatively bundles the whole project into the traced output.
-  return path.join(/*turbopackIgnore: true*/ getUploadsRoot(), url.slice(UPLOADS_URL_PREFIX.length));
+  const absolutePath = path.join(
+    /*turbopackIgnore: true*/ getUploadsRoot(),
+    url.slice(UPLOADS_URL_PREFIX.length)
+  );
+  return pathToFileURL(absolutePath).href;
 }

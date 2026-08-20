@@ -28,10 +28,12 @@
     "files": [
       "dist-electron/**"
     ],
+    "afterPack": "scripts/after-pack.mjs",
     "extraResources": [
       {
         "from": ".next/standalone",
-        "to": "standalone"
+        "to": "standalone",
+        "filter": ["**/*"]
       },
       {
         "from": "prisma/schema.prisma",
