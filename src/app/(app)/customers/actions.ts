@@ -103,7 +103,32 @@ export async function deleteCustomerAction(
     return { error: "This customer has invoices and can't be deleted." };
   }
 
-  await prisma.customer.delete({ where: { id: customer.id } });
+  await prisma.customer.update({ where: { id: customer.id }, data: { deletedAt: new Date() } });
   revalidatePath("/customers");
+  revalidatePath("/trash");
   return { success: true };
+}
+
+export async function restoreCustomerAction(id: string): Promise<{ error?: string }> {
+  const business = await requireCurrentBusiness();
+  const { count } = await prisma.customer.updateMany({
+    where: { id, businessId: business.id, deletedAt: { not: null } },
+    data: { deletedAt: null },
+  });
+  if (count === 0) return { error: "Customer not found in trash." };
+  revalidatePath("/customers");
+  revalidatePath("/trash");
+  return {};
+}
+
+export async function purgeCustomerAction(id: string): Promise<{ error?: string }> {
+  const business = await requireCurrentBusiness();
+  const customer = await prisma.customer.findFirst({
+    where: { id, businessId: business.id, deletedAt: { not: null } },
+    select: { id: true },
+  });
+  if (!customer) return { error: "Customer not found in trash." };
+  await prisma.customer.delete({ where: { id: customer.id } });
+  revalidatePath("/trash");
+  return {};
 }

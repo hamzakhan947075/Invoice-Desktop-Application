@@ -4,6 +4,7 @@ import { requireCurrentBusiness } from "@/lib/auth/current-user";
 import { prisma } from "@/lib/prisma";
 import { Button } from "@/components/ui/button";
 import { InvoicesView } from "@/components/invoices/invoices-view";
+import { ExportCsvButton } from "@/components/shared/export-csv-button";
 import { INVOICE_STATUS_LABELS, getEffectiveInvoiceStatus, invoiceStatusWhere } from "@/lib/invoice-status";
 import type { InvoiceStatus } from "@/generated/prisma/enums";
 import type { CurrencyCode } from "@/lib/currencies";
@@ -79,7 +80,8 @@ export default async function InvoicesPage({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        <ExportCsvButton href="/api/export/invoices" />
         <Button asChild>
           <Link href="/invoices/new">
             <Plus className="h-4 w-4" />

@@ -8,7 +8,9 @@ import {
   Repeat,
   Receipt,
   Undo2,
+  Trash2,
   Settings,
+  BarChart3,
   type LucideIcon,
 } from "lucide-react";
 
@@ -28,5 +30,7 @@ export const navItems: NavItem[] = [
   { label: "Expenses", href: "/expenses", icon: Receipt },
   { label: "Payments", href: "/payments", icon: Wallet },
   { label: "Credit Notes", href: "/credit-notes", icon: Undo2 },
+  { label: "Reports", href: "/reports", icon: BarChart3 },
+  { label: "Trash", href: "/trash", icon: Trash2 },
   { label: "Settings", href: "/settings", icon: Settings },
 ];

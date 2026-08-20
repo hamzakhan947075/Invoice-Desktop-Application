@@ -1,6 +1,11 @@
 {
   "name": "invoiceflow-desktop",
   "version": "0.1.0",
+  "description": "Self-contained desktop invoicing app — invoices, quotes, credit notes, expenses, inventory, and recurring billing, backed by a local SQLite file.",
+  "author": {
+    "name": "Muhammad Hamza",
+    "email": "muhammad.hamza@secureism.com"
+  },
   "private": true,
   "main": "dist-electron/main.js",
   "scripts": {
@@ -25,6 +30,11 @@
     "directories": {
       "output": "release"
     },
+    "publish": {
+      "provider": "github",
+      "owner": "hamzakhan947075",
+      "repo": "Invoice-Desktop-Application"
+    },
     "files": [
       "dist-electron/**"
     ],
@@ -33,7 +43,9 @@
       {
         "from": ".next/standalone",
         "to": "standalone",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "prisma/schema.prisma",
@@ -51,18 +63,21 @@
       "**/node_modules/@prisma/**"
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "build-resources/icon.ico"
     },
     "mac": {
       "target": "dmg",
-      "category": "public.app-category.finance"
+      "category": "public.app-category.finance",
+      "icon": "build-resources/icon.icns"
     },
     "linux": {
       "target": [
         "AppImage",
         "deb"
       ],
-      "category": "Office"
+      "category": "Office",
+      "icon": "build-resources/icon.png"
     }
   },
   "dependencies": {
@@ -74,6 +89,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "dotenv": "^17.4.2",
+    "electron-updater": "^6.8.9",
     "lucide-react": "^1.33.0",
     "next": "16.3.1",
     "next-themes": "^0.4.6",
@@ -98,6 +114,7 @@
     "electron-builder": "^26.15.3",
     "eslint": "^9",
     "eslint-config-next": "16.3.1",
+    "png2icons": "^2.0.1",
     "prisma": "^7.9.1",
     "tailwindcss": "^4",
     "tsup": "^8.5.1",

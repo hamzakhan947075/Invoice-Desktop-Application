@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog } from "electron";
+import { autoUpdater } from "electron-updater";
 import { spawn, type ChildProcess } from "child_process";
 import path from "path";
 import fs from "fs";
@@ -86,6 +87,31 @@ async function findFreePort(startPort: number, maxAttempts = 20): Promise<number
   throw new Error(`No free port found in range ${startPort}-${startPort + maxAttempts}`);
 }
 
+const MAX_AUTO_BACKUPS = 5;
+
+/** Copies the current db into userData/backups/ and prunes anything past the last MAX_AUTO_BACKUPS, so a bad session has a way back that isn't the user having to remember to click "Download backup" first. */
+function rotateAutoBackup(dbPath: string, dataDir: string) {
+  if (!fs.existsSync(dbPath)) return; // nothing to back up yet — first launch.
+
+  try {
+    const backupsDir = path.join(dataDir, "backups");
+    fs.mkdirSync(backupsDir, { recursive: true });
+
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    fs.copyFileSync(dbPath, path.join(backupsDir, `invoiceflow-${stamp}.db`));
+
+    const existing = fs
+      .readdirSync(backupsDir)
+      .filter((name) => name.endsWith(".db"))
+      .sort();
+    for (const name of existing.slice(0, Math.max(0, existing.length - MAX_AUTO_BACKUPS))) {
+      fs.unlinkSync(path.join(backupsDir, name));
+    }
+  } catch (error) {
+    logFatal(`Auto-backup rotation failed (non-fatal): ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 async function startPackagedServer(): Promise<string> {
   const userData = app.getPath("userData");
   const dataDir = path.join(userData, "data");
@@ -115,6 +141,8 @@ async function startPackagedServer(): Promise<string> {
       }
     }
   }
+
+  rotateAutoBackup(dbPath, dataDir);
 
   const migrationsDir = getResourcePath("prisma", "migrations");
   await runMigrations(databaseUrl, migrationsDir);
@@ -181,6 +209,31 @@ async function checkRecurringInvoices(baseUrl: string, cronSecret: string) {
   }
 }
 
+/**
+ * Checks GitHub Releases for a newer version and, if the user accepts,
+ * downloads and installs it on quit. Every step is best-effort — no
+ * internet, no releases published yet, or a network hiccup should never
+ * be treated as a startup failure.
+ */
+function checkForUpdates() {
+  autoUpdater.on("error", (error) => logFatal(`Auto-update check failed: ${error.message}`));
+  autoUpdater.on("update-downloaded", async (info) => {
+    const { response } = await dialog.showMessageBox({
+      type: "info",
+      title: "Update ready",
+      message: `InvoiceFlow ${info.version} has been downloaded.`,
+      detail: "Restart now to install it, or install it next time you quit.",
+      buttons: ["Restart now", "Later"],
+      defaultId: 0,
+    });
+    if (response === 0) autoUpdater.quitAndInstall();
+  });
+
+  autoUpdater.checkForUpdatesAndNotify().catch((error) => {
+    logFatal(`Auto-update check failed: ${error instanceof Error ? error.message : String(error)}`);
+  });
+}
+
 async function createWindow(url: string) {
   mainWindow = new BrowserWindow({
     width: 1360,
@@ -202,6 +255,7 @@ if (gotLock) {
         const url = await startPackagedServer();
         await createWindow(url);
         await checkRecurringInvoices(url, "invoiceflow-local-cron");
+        checkForUpdates();
       } else {
         const url = `http://127.0.0.1:${DEV_PORT}`;
         await waitForServer(url, 30000);

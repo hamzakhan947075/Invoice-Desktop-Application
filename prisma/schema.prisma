@@ -128,10 +128,13 @@ model Customer {
   recurringInvoices RecurringInvoice[]
   quotes            Quote[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  // Soft-delete — see the Trash page. Null means active/visible.
+  deletedAt DateTime?
 
   @@index([businessId])
+  @@index([deletedAt])
   @@map("customers")
 }
 
@@ -160,10 +163,13 @@ model Product {
   quoteItems            QuoteItem[]
   stockMovements        StockMovement[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  // Soft-delete — see the Trash page. Null means active/visible.
+  deletedAt DateTime?
 
   @@index([businessId])
+  @@index([deletedAt])
   @@map("products")
 }
 
@@ -203,13 +209,17 @@ model Invoice {
   // No `fields`/`references` here — the FK lives on Quote.convertedInvoiceId.
   sourceQuote Quote?
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  // Soft-delete — see the Trash page. Only DRAFT invoices can be deleted
+  // (enforced in the action, not here), so this only ever applies to drafts.
+  deletedAt DateTime?
 
   @@unique([businessId, invoiceNumber])
   @@index([businessId])
   @@index([customerId])
   @@index([recurringInvoiceId])
+  @@index([deletedAt])
   @@map("invoices")
 }
 

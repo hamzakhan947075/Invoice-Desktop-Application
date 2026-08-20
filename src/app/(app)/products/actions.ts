@@ -123,7 +123,35 @@ export async function deleteProductAction(
 
   // Past invoice items snapshot their own description/price/tax and only
   // reference the product loosely (onDelete: SetNull), so this is always safe.
-  await prisma.product.deleteMany({ where: { id, businessId: business.id } });
+  await prisma.product.updateMany({
+    where: { id, businessId: business.id },
+    data: { deletedAt: new Date() },
+  });
   revalidatePath("/products");
+  revalidatePath("/trash");
   return { success: true };
+}
+
+export async function restoreProductAction(id: string): Promise<{ error?: string }> {
+  const business = await requireCurrentBusiness();
+  const { count } = await prisma.product.updateMany({
+    where: { id, businessId: business.id, deletedAt: { not: null } },
+    data: { deletedAt: null },
+  });
+  if (count === 0) return { error: "Product not found in trash." };
+  revalidatePath("/products");
+  revalidatePath("/trash");
+  return {};
+}
+
+export async function purgeProductAction(id: string): Promise<{ error?: string }> {
+  const business = await requireCurrentBusiness();
+  const product = await prisma.product.findFirst({
+    where: { id, businessId: business.id, deletedAt: { not: null } },
+    select: { id: true },
+  });
+  if (!product) return { error: "Product not found in trash." };
+  await prisma.product.delete({ where: { id: product.id } });
+  revalidatePath("/trash");
+  return {};
 }

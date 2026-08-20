@@ -1,8 +1,8 @@
-import type { Prisma, PrismaClient } from "@/generated/prisma/client";
+import type { PrismaTransactionClient } from "@/lib/prisma";
 
 /** Generates the next sequential credit note number for a business: CN-{year}-{seq:04d}. */
 export async function generateCreditNoteNumber(
-  tx: Prisma.TransactionClient | PrismaClient,
+  tx: PrismaTransactionClient,
   businessId: string,
   issueDate: Date
 ): Promise<string> {

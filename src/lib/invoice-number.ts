@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient } from "@/generated/prisma/client";
+import type { PrismaTransactionClient } from "@/lib/prisma";
 
 /**
  * Generates the next sequential invoice number for a business, scoped to
@@ -7,7 +7,7 @@ import type { Prisma, PrismaClient } from "@/generated/prisma/client";
  * against the (businessId, invoiceNumber) unique constraint.
  */
 export async function generateInvoiceNumber(
-  tx: Prisma.TransactionClient | PrismaClient,
+  tx: PrismaTransactionClient,
   businessId: string,
   issueDate: Date
 ): Promise<string> {

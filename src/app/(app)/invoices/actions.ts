@@ -168,8 +168,9 @@ export async function updateInvoiceAction(
 export async function deleteDraftInvoiceAction(invoiceId: string): Promise<{ error?: string }> {
   const business = await requireCurrentBusiness();
 
-  const { count } = await prisma.invoice.deleteMany({
+  const { count } = await prisma.invoice.updateMany({
     where: { id: invoiceId, businessId: business.id, status: "DRAFT" },
+    data: { deletedAt: new Date() },
   });
 
   if (count === 0) {
@@ -177,8 +178,34 @@ export async function deleteDraftInvoiceAction(invoiceId: string): Promise<{ err
   }
 
   revalidatePath("/invoices");
+  revalidatePath("/trash");
   revalidatePath("/");
   redirect("/invoices");
+}
+
+export async function restoreInvoiceAction(id: string): Promise<{ error?: string }> {
+  const business = await requireCurrentBusiness();
+  const { count } = await prisma.invoice.updateMany({
+    where: { id, businessId: business.id, deletedAt: { not: null } },
+    data: { deletedAt: null },
+  });
+  if (count === 0) return { error: "Invoice not found in trash." };
+  revalidatePath("/invoices");
+  revalidatePath("/trash");
+  revalidatePath("/");
+  return {};
+}
+
+export async function purgeInvoiceAction(id: string): Promise<{ error?: string }> {
+  const business = await requireCurrentBusiness();
+  const invoice = await prisma.invoice.findFirst({
+    where: { id, businessId: business.id, deletedAt: { not: null } },
+    select: { id: true },
+  });
+  if (!invoice) return { error: "Invoice not found in trash." };
+  await prisma.invoice.delete({ where: { id: invoice.id } });
+  revalidatePath("/trash");
+  return {};
 }
 
 export async function markInvoiceSentAction(invoiceId: string): Promise<{ error?: string }> {
