@@ -26,6 +26,7 @@ export default async function CustomerDetailPage({
     where: { id, businessId: business.id },
     include: {
       invoices: {
+        where: { deletedAt: null },
         orderBy: { issueDate: "desc" },
         select: {
           id: true,
@@ -44,7 +45,7 @@ export default async function CustomerDetailPage({
   if (!customer) notFound();
 
   const payments = await prisma.payment.findMany({
-    where: { businessId: business.id, invoice: { customerId: id } },
+    where: { businessId: business.id, invoice: { customerId: id, deletedAt: null } },
     include: { invoice: { select: { invoiceNumber: true } } },
     orderBy: { paymentDate: "desc" },
   });

@@ -1,17 +1,25 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { Lock } from "lucide-react";
 import { unlockAction, type UnlockActionState } from "@/app/lock/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { RecoverPinForm } from "@/components/lock/recover-pin-form";
 
-export function LockForm({ next }: { next: string }) {
+export function LockForm({ next, recoveryQuestion }: { next: string; recoveryQuestion: string | null }) {
   const [state, formAction, pending] = useActionState<UnlockActionState, FormData>(
     unlockAction,
     undefined
   );
+  const [recovering, setRecovering] = useState(false);
+
+  if (recovering && recoveryQuestion) {
+    return (
+      <RecoverPinForm next={next} recoveryQuestion={recoveryQuestion} onCancel={() => setRecovering(false)} />
+    );
+  }
 
   return (
     <Card className="w-full max-w-sm">
@@ -37,6 +45,15 @@ export function LockForm({ next }: { next: string }) {
           <Button type="submit" disabled={pending} className="w-full">
             {pending ? "Unlocking…" : "Unlock"}
           </Button>
+          {recoveryQuestion && (
+            <button
+              type="button"
+              onClick={() => setRecovering(true)}
+              className="text-center text-sm text-muted-foreground hover:text-foreground hover:underline"
+            >
+              Forgot PIN?
+            </button>
+          )}
         </form>
       </CardContent>
     </Card>

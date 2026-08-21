@@ -86,7 +86,15 @@ export function RecordPaymentDialog({
           <FieldGroup>
             <Field>
               <FieldLabel htmlFor="amount">Amount</FieldLabel>
-              <Input id="amount" name="amount" type="number" step="0.01" min="0.01" required />
+              <Input
+                id="amount"
+                name="amount"
+                type="number"
+                step="0.01"
+                min="0.01"
+                defaultValue={balanceDue}
+                required
+              />
             </Field>
             <Field>
               <FieldLabel htmlFor="paymentDate">Payment date</FieldLabel>

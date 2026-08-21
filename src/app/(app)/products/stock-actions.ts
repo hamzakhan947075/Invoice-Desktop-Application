@@ -5,6 +5,7 @@ import { requireCurrentBusiness } from "@/lib/auth/current-user";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma/client";
 import { stockAdjustmentSchema, type StockAdjustmentInput } from "@/lib/validations/stock-adjustment";
+import { logActivity } from "@/lib/activity-log";
 
 export type StockAdjustmentActionResult = { error?: string };
 
@@ -30,7 +31,7 @@ export async function adjustStockAction(
     await prisma.$transaction(async (tx) => {
       const product = await tx.product.findFirst({
         where: { id: productId, businessId: business.id },
-        select: { id: true, trackInventory: true, stockQuantity: true },
+        select: { id: true, name: true, trackInventory: true, stockQuantity: true },
       });
       if (!product) throw new StockAdjustmentActionError("Product not found.");
       if (!product.trackInventory) {
@@ -62,6 +63,15 @@ export async function adjustStockAction(
           "This item's stock just changed elsewhere. Please review and try again."
         );
       }
+
+      await logActivity(tx, {
+        businessId: business.id,
+        action: "product.stock_adjusted",
+        entityType: "Product",
+        entityId: product.id,
+        summary: `${data.type === "INCREASE" ? "Increased" : "Decreased"} stock of ${product.name} by ${quantity.toFixed(2)}`,
+        changes: [{ field: "stockQuantity", from: product.stockQuantity.toFixed(2), to: newQuantity.toFixed(2) }],
+      });
     });
   } catch (error) {
     if (error instanceof StockAdjustmentActionError) {

@@ -65,7 +65,7 @@ export function BusinessProfileForm({ business }: { business: BusinessProfile })
               id="logo"
               name="logo"
               type="file"
-              accept="image/png,image/jpeg,image/webp"
+              accept="image/png,image/jpeg,image/webp,image/gif"
               className="max-w-xs"
               onChange={(event) => {
                 const file = event.target.files?.[0];
@@ -73,7 +73,7 @@ export function BusinessProfileForm({ business }: { business: BusinessProfile })
               }}
             />
           </div>
-          <FieldDescription>PNG, JPEG, or WEBP. Max 2MB.</FieldDescription>
+          <FieldDescription>PNG, JPEG, WEBP, or GIF. Max 2MB.</FieldDescription>
         </Field>
 
         <Field>

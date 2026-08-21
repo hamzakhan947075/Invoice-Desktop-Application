@@ -1,13 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { requireCurrentBusiness } from "@/lib/auth/current-user";
 import { prisma } from "@/lib/prisma";
 import { invoiceSchema, type InvoiceInput } from "@/lib/validations/invoice";
-import { calculateInvoiceTotals, calculateLineItem, applyPayment } from "@/lib/invoice-calculations";
+import { calculateInvoiceTotals, calculateLineItem } from "@/lib/invoice-calculations";
 import { generateInvoiceNumber } from "@/lib/invoice-number";
 import { resolveOwnedProductIds } from "@/lib/resolve-owned-products";
+import { logActivity, diffFields } from "@/lib/activity-log";
 
 export type InvoiceActionResult = { error?: string; invoiceId?: string };
 
@@ -39,7 +39,7 @@ export async function createInvoiceAction(input: InvoiceInput): Promise<InvoiceA
   const invoice = await prisma.$transaction(async (tx) => {
     const invoiceNumber = await generateInvoiceNumber(tx, business.id, issueDate);
 
-    return tx.invoice.create({
+    const created = await tx.invoice.create({
       data: {
         businessId: business.id,
         customerId: data.customerId,
@@ -70,8 +70,18 @@ export async function createInvoiceAction(input: InvoiceInput): Promise<InvoiceA
           }),
         },
       },
-      select: { id: true },
+      select: { id: true, invoiceNumber: true },
     });
+
+    await logActivity(tx, {
+      businessId: business.id,
+      action: "invoice.created",
+      entityType: "Invoice",
+      entityId: created.id,
+      summary: `Created invoice ${created.invoiceNumber} for ${totals.total.toFixed(2)} ${data.currency}`,
+    });
+
+    return created;
   });
 
   revalidatePath("/invoices");
@@ -87,7 +97,17 @@ export async function updateInvoiceAction(
 
   const existing = await prisma.invoice.findFirst({
     where: { id: invoiceId, businessId: business.id },
-    select: { id: true, status: true },
+    select: {
+      id: true,
+      status: true,
+      invoiceNumber: true,
+      customerId: true,
+      issueDate: true,
+      dueDate: true,
+      currency: true,
+      total: true,
+      notes: true,
+    },
   });
   if (!existing) return { error: "Invoice not found." };
   if (existing.status !== "DRAFT") {
@@ -151,6 +171,32 @@ export async function updateInvoiceAction(
           };
         }),
       });
+
+      await logActivity(tx, {
+        businessId: business.id,
+        action: "invoice.updated",
+        entityType: "Invoice",
+        entityId: invoiceId,
+        summary: `Updated invoice ${existing.invoiceNumber}`,
+        changes: diffFields(
+          {
+            customerId: existing.customerId,
+            issueDate: existing.issueDate.toISOString(),
+            dueDate: existing.dueDate.toISOString(),
+            currency: existing.currency,
+            total: existing.total.toFixed(2),
+            notes: existing.notes,
+          },
+          {
+            customerId: data.customerId,
+            issueDate: new Date(data.issueDate).toISOString(),
+            dueDate: new Date(data.dueDate).toISOString(),
+            currency: data.currency,
+            total: totals.total.toFixed(2),
+            notes: data.notes || null,
+          }
+        ),
+      });
     });
   } catch (error) {
     if (error instanceof InvoiceActionError) {
@@ -165,31 +211,58 @@ export async function updateInvoiceAction(
   return { invoiceId };
 }
 
-export async function deleteDraftInvoiceAction(invoiceId: string): Promise<{ error?: string }> {
+export async function deleteInvoiceAction(invoiceId: string): Promise<{ error?: string }> {
   const business = await requireCurrentBusiness();
 
-  const { count } = await prisma.invoice.updateMany({
-    where: { id: invoiceId, businessId: business.id, status: "DRAFT" },
+  const invoice = await prisma.invoice.findFirst({
+    where: { id: invoiceId, businessId: business.id },
+    select: { id: true, invoiceNumber: true },
+  });
+  if (!invoice) return { error: "Invoice not found." };
+
+  // Deleting a non-draft invoice also takes its payments and credit notes
+  // with it (see the Cascade relations in schema.prisma) once it's purged
+  // from trash — the confirmation dialog warns about this up front.
+  await prisma.invoice.update({
+    where: { id: invoice.id },
     data: { deletedAt: new Date() },
   });
 
-  if (count === 0) {
-    return { error: "Only draft invoices can be deleted." };
-  }
+  await logActivity(prisma, {
+    businessId: business.id,
+    action: "invoice.deleted",
+    entityType: "Invoice",
+    entityId: invoice.id,
+    summary: `Moved invoice ${invoice.invoiceNumber} to Trash`,
+  });
 
   revalidatePath("/invoices");
+  revalidatePath(`/invoices/${invoiceId}`);
+  revalidatePath("/payments");
+  revalidatePath("/customers");
   revalidatePath("/trash");
   revalidatePath("/");
-  redirect("/invoices");
+  return {};
 }
 
 export async function restoreInvoiceAction(id: string): Promise<{ error?: string }> {
   const business = await requireCurrentBusiness();
-  const { count } = await prisma.invoice.updateMany({
+  const invoice = await prisma.invoice.findFirst({
     where: { id, businessId: business.id, deletedAt: { not: null } },
-    data: { deletedAt: null },
+    select: { id: true, invoiceNumber: true },
   });
-  if (count === 0) return { error: "Invoice not found in trash." };
+  if (!invoice) return { error: "Invoice not found in trash." };
+
+  await prisma.invoice.update({ where: { id: invoice.id }, data: { deletedAt: null } });
+
+  await logActivity(prisma, {
+    businessId: business.id,
+    action: "invoice.restored",
+    entityType: "Invoice",
+    entityId: invoice.id,
+    summary: `Restored invoice ${invoice.invoiceNumber} from Trash`,
+  });
+
   revalidatePath("/invoices");
   revalidatePath("/trash");
   revalidatePath("/");
@@ -200,47 +273,48 @@ export async function purgeInvoiceAction(id: string): Promise<{ error?: string }
   const business = await requireCurrentBusiness();
   const invoice = await prisma.invoice.findFirst({
     where: { id, businessId: business.id, deletedAt: { not: null } },
-    select: { id: true },
+    select: { id: true, invoiceNumber: true },
   });
   if (!invoice) return { error: "Invoice not found in trash." };
   await prisma.invoice.delete({ where: { id: invoice.id } });
-  revalidatePath("/trash");
-  return {};
-}
 
-export async function markInvoiceSentAction(invoiceId: string): Promise<{ error?: string }> {
-  const business = await requireCurrentBusiness();
-
-  const { count } = await prisma.invoice.updateMany({
-    where: { id: invoiceId, businessId: business.id, status: "DRAFT" },
-    data: { status: "SENT" },
+  await logActivity(prisma, {
+    businessId: business.id,
+    action: "invoice.purged",
+    entityType: "Invoice",
+    entityId: invoice.id,
+    summary: `Permanently deleted invoice ${invoice.invoiceNumber}`,
   });
 
-  if (count === 0) {
-    return { error: "Only draft invoices can be marked as sent." };
-  }
-
-  revalidatePath("/invoices");
-  revalidatePath(`/invoices/${invoiceId}`);
-  revalidatePath("/");
+  revalidatePath("/trash");
   return {};
 }
 
 export async function cancelInvoiceAction(invoiceId: string): Promise<{ error?: string }> {
   const business = await requireCurrentBusiness();
 
-  const { count } = await prisma.invoice.updateMany({
+  const invoice = await prisma.invoice.findFirst({
     where: {
       id: invoiceId,
       businessId: business.id,
       status: { in: ["DRAFT", "SENT", "PARTIALLY_PAID", "OVERDUE"] },
     },
-    data: { status: "CANCELLED" },
+    select: { id: true, invoiceNumber: true, status: true },
   });
-
-  if (count === 0) {
+  if (!invoice) {
     return { error: "This invoice can't be cancelled." };
   }
+
+  await prisma.invoice.update({ where: { id: invoice.id }, data: { status: "CANCELLED" } });
+
+  await logActivity(prisma, {
+    businessId: business.id,
+    action: "invoice.cancelled",
+    entityType: "Invoice",
+    entityId: invoice.id,
+    summary: `Cancelled invoice ${invoice.invoiceNumber}`,
+    changes: [{ field: "status", from: invoice.status, to: "CANCELLED" }],
+  });
 
   revalidatePath("/invoices");
   revalidatePath(`/invoices/${invoiceId}`);
@@ -257,89 +331,63 @@ export async function cancelInvoiceAction(invoiceId: string): Promise<{ error?: 
 export async function markInvoiceOverdueAction(invoiceId: string): Promise<{ error?: string }> {
   const business = await requireCurrentBusiness();
 
-  const { count } = await prisma.invoice.updateMany({
+  const invoice = await prisma.invoice.findFirst({
     where: {
       id: invoiceId,
       businessId: business.id,
       status: { in: ["SENT", "PARTIALLY_PAID"] },
     },
-    data: { status: "OVERDUE" },
+    select: { id: true, invoiceNumber: true, status: true },
   });
-
-  if (count === 0) {
+  if (!invoice) {
     return { error: "Only a sent or partially-paid invoice can be marked overdue." };
   }
 
+  await prisma.invoice.update({ where: { id: invoice.id }, data: { status: "OVERDUE" } });
+
+  await logActivity(prisma, {
+    businessId: business.id,
+    action: "invoice.status_changed",
+    entityType: "Invoice",
+    entityId: invoice.id,
+    summary: `Marked invoice ${invoice.invoiceNumber} as Overdue`,
+    changes: [{ field: "status", from: invoice.status, to: "OVERDUE" }],
+  });
+
   revalidatePath("/invoices");
   revalidatePath(`/invoices/${invoiceId}`);
   revalidatePath("/");
   return {};
 }
-
-class MarkPaidActionError extends Error {}
 
 /**
- * Marks an invoice fully paid by recording a real payment for the entire
- * remaining balance — money math (amountPaid/balanceDue) always stays
- * consistent with status, the same as using Record Payment for the full
- * amount. Uses the same read-then-guarded-write transaction pattern as
- * recordPaymentAction to close the same concurrent-payment race.
+ * Records that the user handed this invoice off to their email client via
+ * the Send/Resend Email button. There's no real send happening here — the
+ * app never touches the customer's inbox — so this is "the user clicked
+ * send," not delivery confirmation.
  */
-export async function markInvoicePaidAction(invoiceId: string): Promise<{ error?: string }> {
+export async function recordInvoiceEmailedAction(invoiceId: string): Promise<{ error?: string }> {
   const business = await requireCurrentBusiness();
 
-  try {
-    await prisma.$transaction(async (tx) => {
-      const invoice = await tx.invoice.findFirst({
-        where: { id: invoiceId, businessId: business.id },
-        select: { id: true, status: true, total: true, amountPaid: true, balanceDue: true },
-      });
-      if (!invoice) throw new MarkPaidActionError("Invoice not found.");
-      if (!["SENT", "PARTIALLY_PAID", "OVERDUE"].includes(invoice.status)) {
-        throw new MarkPaidActionError("This invoice can't be marked paid.");
-      }
-      if (invoice.balanceDue.lessThanOrEqualTo(0)) {
-        throw new MarkPaidActionError("This invoice has no remaining balance.");
-      }
+  const invoice = await prisma.invoice.findFirst({
+    where: { id: invoiceId, businessId: business.id },
+    select: { id: true, invoiceNumber: true, lastEmailedAt: true },
+  });
+  if (!invoice) return { error: "Invoice not found." };
 
-      const paymentAmount = invoice.balanceDue;
-      const progress = applyPayment(invoice.total, invoice.amountPaid, paymentAmount);
+  const wasResend = invoice.lastEmailedAt !== null;
+  await prisma.invoice.update({ where: { id: invoice.id }, data: { lastEmailedAt: new Date() } });
 
-      await tx.payment.create({
-        data: {
-          businessId: business.id,
-          invoiceId: invoice.id,
-          amount: paymentAmount,
-          paymentDate: new Date(),
-          paymentMethod: "OTHER",
-          notes: 'Recorded via "Mark as Paid."',
-        },
-      });
+  await logActivity(prisma, {
+    businessId: business.id,
+    action: wasResend ? "invoice.email_resent" : "invoice.emailed",
+    entityType: "Invoice",
+    entityId: invoice.id,
+    summary: `${wasResend ? "Resent" : "Emailed"} invoice ${invoice.invoiceNumber} to the customer`,
+  });
 
-      const { count } = await tx.invoice.updateMany({
-        where: { id: invoice.id, businessId: business.id, amountPaid: invoice.amountPaid },
-        data: {
-          amountPaid: progress.amountPaid,
-          balanceDue: progress.balanceDue,
-          status: "PAID",
-        },
-      });
-      if (count === 0) {
-        throw new MarkPaidActionError(
-          "This invoice's balance just changed elsewhere. Please review and try again."
-        );
-      }
-    });
-  } catch (error) {
-    if (error instanceof MarkPaidActionError) {
-      return { error: error.message };
-    }
-    throw error;
-  }
-
-  revalidatePath("/invoices");
   revalidatePath(`/invoices/${invoiceId}`);
-  revalidatePath("/payments");
-  revalidatePath("/");
+  revalidatePath("/invoices");
   return {};
 }
+

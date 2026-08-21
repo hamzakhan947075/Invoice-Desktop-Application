@@ -4,17 +4,14 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Download, Eye, Pencil, Printer, Send, CircleCheck, Clock, Ban, Trash2 } from "lucide-react";
-import {
-  markInvoiceSentAction,
-  markInvoicePaidAction,
-  markInvoiceOverdueAction,
-} from "@/app/(app)/invoices/actions";
+import { Download, Eye, Pencil, Clock, Ban, Trash2 } from "lucide-react";
+import { markInvoiceOverdueAction } from "@/app/(app)/invoices/actions";
 import { Button } from "@/components/ui/button";
 import { RecordPaymentDialog } from "@/components/invoices/record-payment-dialog";
 import { IssueCreditNoteDialog } from "@/components/invoices/issue-credit-note-dialog";
 import { DeleteInvoiceDialog } from "@/components/invoices/delete-invoice-dialog";
 import { CancelInvoiceDialog } from "@/components/invoices/cancel-invoice-dialog";
+import { SendInvoiceEmailButton } from "@/components/invoices/send-invoice-email-button";
 import type { InvoiceStatus } from "@/generated/prisma/enums";
 
 export function InvoiceActions({
@@ -22,21 +19,31 @@ export function InvoiceActions({
   invoiceNumber,
   status,
   balanceDue,
+  total,
   currency,
+  customerName,
+  customerEmail,
+  businessName,
+  lastEmailedAt,
 }: {
   invoiceId: string;
   invoiceNumber: string;
   status: InvoiceStatus;
   balanceDue: string;
+  total: string;
   currency: string;
+  customerName: string;
+  customerEmail: string | null;
+  businessName: string;
+  lastEmailedAt: string | null;
 }) {
   const router = useRouter();
-  const [pending, setPending] = useState<"sent" | "paid" | "overdue" | null>(null);
+  const [pending, setPending] = useState<"overdue" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
 
-  async function run(action: () => Promise<{ error?: string }>, key: "sent" | "paid" | "overdue", message: string) {
+  async function run(action: () => Promise<{ error?: string }>, key: "overdue", message: string) {
     setPending(key);
     setError(null);
     const result = await action();
@@ -49,10 +56,16 @@ export function InvoiceActions({
     setPending(null);
   }
 
+  // Draft invoices can now go straight to Record Payment — there's no
+  // separate "mark as sent" step, so recording any payment (partial or full)
+  // is what actually moves a Draft forward to Partially Paid/Paid.
+  const canRecordPayment =
+    status === "DRAFT" || status === "SENT" || status === "PARTIALLY_PAID" || status === "OVERDUE";
+  // Credit notes are corrections to an already-issued invoice, so Draft stays excluded here.
+  const canIssueCreditNote = status === "SENT" || status === "PARTIALLY_PAID" || status === "OVERDUE";
   // OVERDUE can now be a manually-set stored status (via Mark Overdue), not just
   // an automatic due-date derivation — either way it carries the same
   // permissions as the SENT/PARTIALLY_PAID it stands in for.
-  const canRecordPayment = status === "SENT" || status === "PARTIALLY_PAID" || status === "OVERDUE";
   const canMarkOverdue = status === "SENT" || status === "PARTIALLY_PAID";
   const canCancel = status === "SENT" || status === "PARTIALLY_PAID" || status === "OVERDUE";
 
@@ -67,10 +80,10 @@ export function InvoiceActions({
             </Link>
           </Button>
         )}
-        <Button variant="outline" asChild>
+        <Button variant="outline" asChild title="Opens in the PDF viewer, which has its own working print button with a real preview — window.print() on this page can't offer one in Electron.">
           <a href={`/invoices/${invoiceId}/pdf?disposition=inline`} target="_blank" rel="noopener noreferrer">
             <Eye className="h-4 w-4" />
-            View PDF
+            View / Print PDF
           </a>
         </Button>
         <Button variant="outline" asChild>
@@ -79,35 +92,21 @@ export function InvoiceActions({
             Download PDF
           </a>
         </Button>
-        <Button variant="outline" onClick={() => window.print()}>
-          <Printer className="h-4 w-4" />
-          Print
-        </Button>
-        {status === "DRAFT" && (
-          <Button
-            variant="outline"
-            disabled={pending === "sent"}
-            onClick={() => run(() => markInvoiceSentAction(invoiceId), "sent", "Invoice marked as sent.")}
-          >
-            <Send className="h-4 w-4" />
-            {pending === "sent" ? "Marking…" : "Mark as Sent"}
-          </Button>
-        )}
+        <SendInvoiceEmailButton
+          invoiceId={invoiceId}
+          invoiceNumber={invoiceNumber}
+          customerName={customerName}
+          customerEmail={customerEmail}
+          businessName={businessName}
+          total={total}
+          currency={currency}
+          lastEmailedAt={lastEmailedAt}
+        />
         {canRecordPayment && (
           <RecordPaymentDialog invoiceId={invoiceId} balanceDue={balanceDue} currency={currency} />
         )}
-        {canRecordPayment && (
+        {canIssueCreditNote && (
           <IssueCreditNoteDialog invoiceId={invoiceId} balanceDue={balanceDue} currency={currency} />
-        )}
-        {canRecordPayment && (
-          <Button
-            variant="outline"
-            disabled={pending === "paid"}
-            onClick={() => run(() => markInvoicePaidAction(invoiceId), "paid", "Invoice marked as paid.")}
-          >
-            <CircleCheck className="h-4 w-4" />
-            {pending === "paid" ? "Marking…" : "Mark as Paid"}
-          </Button>
         )}
         {canMarkOverdue && (
           <Button
@@ -139,6 +138,7 @@ export function InvoiceActions({
         onOpenChange={setDeleteOpen}
         invoiceId={invoiceId}
         invoiceNumber={invoiceNumber}
+        onDeleted={() => router.push("/invoices")}
       />
       <CancelInvoiceDialog
         open={cancelOpen}

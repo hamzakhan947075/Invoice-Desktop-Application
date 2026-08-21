@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/table";
 import { EmptyState } from "@/components/shared/empty-state";
 import { SearchInput } from "@/components/shared/search-input";
+import { EditPaymentDialog } from "@/components/payments/edit-payment-dialog";
 import { formatMoney } from "@/lib/format";
 import { PAYMENT_METHOD_LABELS } from "@/lib/validations/payment";
 import type { CurrencyCode } from "@/lib/currencies";
@@ -28,6 +29,10 @@ export default async function PaymentsPage({
   const payments = await prisma.payment.findMany({
     where: {
       businessId: business.id,
+      // A deleted invoice's payments shouldn't linger here — see the global
+      // soft-delete filter in lib/prisma.ts, which only covers direct
+      // customer/product/invoice queries, not nested relations like this one.
+      invoice: { deletedAt: null },
       ...(query
         ? {
             OR: [
@@ -67,12 +72,13 @@ export default async function PaymentsPage({
               <TableHead>Method</TableHead>
               <TableHead>Reference</TableHead>
               <TableHead className="text-right">Amount</TableHead>
+              <TableHead className="w-0">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {payments.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="p-0">
+                <TableCell colSpan={7} className="p-0">
                   <EmptyState
                     icon={Wallet}
                     title={query ? "No payments match your search" : "No payments yet"}
@@ -106,6 +112,18 @@ export default async function PaymentsPage({
                   <TableCell className="text-muted-foreground">{payment.reference || "—"}</TableCell>
                   <TableCell className="text-right font-medium">
                     {formatMoney(payment.amount.toFixed(2), payment.invoice.currency || currency)}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex justify-end">
+                      <EditPaymentDialog
+                        paymentId={payment.id}
+                        invoiceNumber={payment.invoice.invoiceNumber}
+                        paymentDate={payment.paymentDate.toISOString().slice(0, 10)}
+                        paymentMethod={payment.paymentMethod}
+                        reference={payment.reference}
+                        notes={payment.notes}
+                      />
+                    </div>
                   </TableCell>
                 </TableRow>
               ))

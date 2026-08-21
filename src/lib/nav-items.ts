@@ -11,6 +11,7 @@ import {
   Trash2,
   Settings,
   BarChart3,
+  History,
   type LucideIcon,
 } from "lucide-react";
 
@@ -32,5 +33,6 @@ export const navItems: NavItem[] = [
   { label: "Credit Notes", href: "/credit-notes", icon: Undo2 },
   { label: "Reports", href: "/reports", icon: BarChart3 },
   { label: "Trash", href: "/trash", icon: Trash2 },
+  { label: "Logs", href: "/logs", icon: History },
   { label: "Settings", href: "/settings", icon: Settings },
 ];

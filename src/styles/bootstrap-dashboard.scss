@@ -1,0 +1,84 @@
+// Scoped Bootstrap import for the Dashboard only.
+//
+// This app is built on Tailwind + shadcn everywhere else, and Tailwind
+// already defines utility classes with the exact same names Bootstrap uses
+// (p-3, m-2, d-flex, text-center, rounded, shadow, container, gap-*, ...) —
+// loading Bootstrap's reboot/type/utilities globally would silently break
+// spacing and layout on every other page, whichever stylesheet happened to
+// load last. So only the pieces with names Tailwind doesn't define at all
+// (.card, .badge, .btn, .progress) are imported here — no reboot, no type,
+// no utilities/helpers.
+//
+// NOT compiled at build time: Turbopack's Sass loader can't resolve
+// Bootstrap 5.3's own internal `@import "variables-dark"` inside its
+// _variables.scss (a backward-compat shim Bootstrap added for v5.3, bare
+// relative import, fails specifically under Turbopack). The Dart Sass CLI
+// resolves it fine, so this file is precompiled to bootstrap-dashboard.css
+// (the file actually imported by the dashboard page) via:
+//   npm run build:bootstrap-css
+// Re-run that after editing anything below.
+@import "bootstrap/scss/functions";
+@import "bootstrap/scss/variables";
+@import "bootstrap/scss/variables-dark";
+@import "bootstrap/scss/maps";
+@import "bootstrap/scss/mixins";
+@import "bootstrap/scss/root";
+
+@import "bootstrap/scss/card";
+@import "bootstrap/scss/badge";
+@import "bootstrap/scss/buttons";
+@import "bootstrap/scss/progress";
+
+// Hand-written, since utilities/helpers (shadow-sm, d-flex, bg-primary, ...)
+// were deliberately left out above — layout on the dashboard uses Tailwind's
+// own utilities instead, which are already loaded app-wide.
+//
+// These two override Bootstrap's own .card/.card-header defaults directly,
+// rather than fighting them with a same-specificity Tailwind class (border-0,
+// bg-transparent) whose win against Bootstrap would otherwise depend on
+// unpredictable stylesheet load order between the two frameworks.
+.card {
+  border: none;
+}
+
+.card-header {
+  border-bottom: none;
+  background-color: transparent;
+}
+
+.dashboard-hero {
+  background: linear-gradient(135deg, var(--bs-primary) 0%, var(--bs-indigo) 100%);
+}
+
+// .card-title's own color rule (from _card.scss) otherwise wins over the
+// Tailwind text-white class on the same element, depending on stylesheet
+// load order — same fix as the .card border override above.
+.dashboard-hero .card-title,
+.dashboard-hero p {
+  color: #fff;
+}
+
+.dashboard-stat-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  color: #fff;
+}
+
+@keyframes dashboard-fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.dashboard-fade-in {
+  animation: dashboard-fade-in-up 0.5s ease-out both;
+}

@@ -192,6 +192,7 @@ export function InvoicesView({
           onOpenChange={(open) => !open && setDeleting(null)}
           invoiceId={deleting.id}
           invoiceNumber={deleting.invoiceNumber}
+          onDeleted={() => router.refresh()}
         />
       )}
       {cancelling && (

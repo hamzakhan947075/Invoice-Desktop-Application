@@ -20,7 +20,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const customer = await prisma.customer.findFirst({
     where: { id, businessId: business.id },
     include: {
-      invoices: { select: { total: true, amountPaid: true, balanceDue: true } },
+      invoices: { where: { deletedAt: null }, select: { total: true, amountPaid: true, balanceDue: true } },
     },
   });
   if (!customer) {
@@ -28,7 +28,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   }
 
   const payments = await prisma.payment.findMany({
-    where: { businessId: business.id, invoice: { customerId: id } },
+    where: { businessId: business.id, invoice: { customerId: id, deletedAt: null } },
     include: { invoice: { select: { invoiceNumber: true } } },
     orderBy: { paymentDate: "desc" },
   });

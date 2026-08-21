@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma/client";
 import { creditNoteSchema, type CreditNoteInput } from "@/lib/validations/credit-note";
 import { generateCreditNoteNumber } from "@/lib/credit-note-number";
+import { logActivity } from "@/lib/activity-log";
 
 export type CreditNoteActionResult = { error?: string };
 
@@ -32,7 +33,7 @@ export async function issueCreditNoteAction(
     await prisma.$transaction(async (tx) => {
       const invoice = await tx.invoice.findFirst({
         where: { id: invoiceId, businessId: business.id },
-        select: { id: true, status: true, balanceDue: true },
+        select: { id: true, invoiceNumber: true, status: true, balanceDue: true },
       });
       if (!invoice) throw new CreditNoteActionError("Invoice not found.");
       if (invoice.status === "DRAFT" || invoice.status === "CANCELLED") {
@@ -45,7 +46,7 @@ export async function issueCreditNoteAction(
       const creditNoteNumber = await generateCreditNoteNumber(tx, business.id, new Date());
       const newBalance = invoice.balanceDue.minus(creditAmount);
 
-      await tx.creditNote.create({
+      const creditNote = await tx.creditNote.create({
         data: {
           businessId: business.id,
           invoiceId: invoice.id,
@@ -68,6 +69,14 @@ export async function issueCreditNoteAction(
           "This invoice's balance just changed elsewhere. Please review and try again."
         );
       }
+
+      await logActivity(tx, {
+        businessId: business.id,
+        action: "credit_note.issued",
+        entityType: "CreditNote",
+        entityId: creditNote.id,
+        summary: `Issued credit note ${creditNoteNumber} (${creditAmount.toFixed(2)}) on invoice ${invoice.invoiceNumber}`,
+      });
     });
   } catch (error) {
     if (error instanceof CreditNoteActionError) {

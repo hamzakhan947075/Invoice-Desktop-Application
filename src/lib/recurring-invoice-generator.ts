@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { calculateInvoiceTotals, calculateLineItem } from "@/lib/invoice-calculations";
 import { generateInvoiceNumber } from "@/lib/invoice-number";
 import { calculateNextRunDate } from "@/lib/recurring-invoice-schedule";
+import { logActivity } from "@/lib/activity-log";
 
 export type GeneratedInvoiceSummary = {
   recurringInvoiceId: string;
@@ -93,6 +94,14 @@ export async function generateInvoiceFromTemplate(
         lastGeneratedAt: new Date(),
         status: isPastEnd ? "COMPLETED" : "ACTIVE",
       },
+    });
+
+    await logActivity(tx, {
+      businessId: template.businessId,
+      action: "recurring_invoice.generated",
+      entityType: "RecurringInvoice",
+      entityId: template.id,
+      summary: `Generated invoice ${invoice.invoiceNumber} from recurring template`,
     });
 
     return {

@@ -4,8 +4,9 @@ import { revalidatePath } from "next/cache";
 import { requireCurrentBusiness } from "@/lib/auth/current-user";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma/client";
-import { paymentSchema, type PaymentInput } from "@/lib/validations/payment";
+import { paymentSchema, paymentEditSchema, type PaymentInput, type PaymentEditInput } from "@/lib/validations/payment";
 import { applyPayment } from "@/lib/invoice-calculations";
+import { logActivity } from "@/lib/activity-log";
 
 export type PaymentActionResult = { error?: string };
 
@@ -32,10 +33,12 @@ export async function recordPaymentAction(
     await prisma.$transaction(async (tx) => {
       const invoice = await tx.invoice.findFirst({
         where: { id: invoiceId, businessId: business.id },
-        select: { id: true, status: true, total: true, amountPaid: true, balanceDue: true },
+        select: { id: true, invoiceNumber: true, status: true, total: true, amountPaid: true, balanceDue: true },
       });
       if (!invoice) throw new PaymentActionError("Invoice not found.");
-      if (invoice.status === "DRAFT" || invoice.status === "CANCELLED") {
+      // Draft invoices can accept payments too — there's no separate "mark as
+      // sent" step, so recording a payment is what moves a Draft forward.
+      if (invoice.status === "CANCELLED") {
         throw new PaymentActionError("This invoice can't accept payments.");
       }
       if (paymentAmount.greaterThan(invoice.balanceDue)) {
@@ -71,6 +74,14 @@ export async function recordPaymentAction(
           "This invoice's balance just changed elsewhere. Please review and try again."
         );
       }
+
+      await logActivity(tx, {
+        businessId: business.id,
+        action: "payment.recorded",
+        entityType: "Payment",
+        entityId: invoice.id,
+        summary: `Recorded ${paymentAmount.toFixed(2)} payment on invoice ${invoice.invoiceNumber}`,
+      });
     });
   } catch (error) {
     if (error instanceof PaymentActionError) {
@@ -83,5 +94,52 @@ export async function recordPaymentAction(
   revalidatePath("/invoices");
   revalidatePath("/payments");
   revalidatePath("/");
+  return {};
+}
+
+/**
+ * Corrects a previously recorded payment's method/date/reference/notes —
+ * never its amount, which would require recomputing the invoice's
+ * amountPaid/balanceDue/status (a materially different, riskier operation).
+ */
+export async function updatePaymentAction(
+  paymentId: string,
+  input: PaymentEditInput
+): Promise<PaymentActionResult> {
+  const business = await requireCurrentBusiness();
+
+  const parsed = paymentEditSchema.safeParse(input);
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+  const data = parsed.data;
+
+  const payment = await prisma.payment.findFirst({
+    where: { id: paymentId, businessId: business.id },
+    select: { id: true, invoiceId: true, paymentMethod: true, invoice: { select: { invoiceNumber: true } } },
+  });
+  if (!payment) return { error: "Payment not found." };
+
+  await prisma.payment.update({
+    where: { id: payment.id },
+    data: {
+      paymentDate: new Date(data.paymentDate),
+      paymentMethod: data.paymentMethod,
+      reference: data.reference || null,
+      notes: data.notes || null,
+    },
+  });
+
+  await logActivity(prisma, {
+    businessId: business.id,
+    action: "payment.updated",
+    entityType: "Payment",
+    entityId: payment.id,
+    summary: `Updated payment on invoice ${payment.invoice.invoiceNumber}`,
+    changes: [{ field: "paymentMethod", from: payment.paymentMethod, to: data.paymentMethod }],
+  });
+
+  revalidatePath(`/invoices/${payment.invoiceId}`);
+  revalidatePath("/payments");
   return {};
 }

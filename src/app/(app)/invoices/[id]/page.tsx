@@ -59,7 +59,12 @@ export default async function InvoiceDetailPage({
           invoiceNumber={invoice.invoiceNumber}
           status={invoice.status}
           balanceDue={invoice.balanceDue.toFixed(2)}
+          total={invoice.total.toFixed(2)}
           currency={currency}
+          customerName={invoice.customer.name}
+          customerEmail={invoice.customer.email}
+          businessName={business.name}
+          lastEmailedAt={invoice.lastEmailedAt ? invoice.lastEmailedAt.toISOString() : null}
         />
       </div>
 
@@ -90,6 +95,11 @@ export default async function InvoiceDetailPage({
               <div className="mt-2">
                 <InvoiceStatusBadge status={status} />
               </div>
+              {invoice.lastEmailedAt && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Last emailed {invoice.lastEmailedAt.toLocaleString()}
+                </p>
+              )}
             </div>
           </div>
 

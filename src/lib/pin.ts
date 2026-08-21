@@ -1,5 +1,7 @@
 import { randomBytes, scryptSync, timingSafeEqual, createHmac } from "crypto";
 
+export const PIN_PATTERN = /^\d{4,8}$/;
+
 /** Stores as "salt:hash" (both hex) in Business.pinHash — no separate secrets table needed. */
 export function hashPin(pin: string): string {
   const salt = randomBytes(16).toString("hex");
@@ -14,6 +16,19 @@ export function verifyPin(pin: string, stored: string): boolean {
   const expected = Buffer.from(hash, "hex");
   if (candidate.length !== expected.length) return false;
   return timingSafeEqual(candidate, expected);
+}
+
+/** Case/whitespace-insensitive so "Blue" and "blue " both match what was set. */
+function normalizeAnswer(answer: string): string {
+  return answer.trim().toLowerCase();
+}
+
+export function hashRecoveryAnswer(answer: string): string {
+  return hashPin(normalizeAnswer(answer));
+}
+
+export function verifyRecoveryAnswer(answer: string, stored: string): boolean {
+  return verifyPin(normalizeAnswer(answer), stored);
 }
 
 export const UNLOCK_COOKIE_NAME = "invoiceflow_unlocked";

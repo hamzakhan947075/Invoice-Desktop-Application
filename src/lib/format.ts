@@ -11,3 +11,11 @@ export function formatMoney(amount: string, currency: CurrencyCode | string) {
     maximumFractionDigits: 2,
   })}`;
 }
+
+/** Two-letter fallback (e.g. "Acme Design Studio" -> "AD") for an avatar with no logo/photo. */
+export function initialsFor(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  const first = parts[0]?.[0] ?? "";
+  const last = parts.length > 1 ? (parts[parts.length - 1]?.[0] ?? "") : "";
+  return (first + last).toUpperCase() || "?";
+}

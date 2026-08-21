@@ -4,11 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { ChevronDown } from "lucide-react";
-import {
-  markInvoiceSentAction,
-  markInvoicePaidAction,
-  markInvoiceOverdueAction,
-} from "@/app/(app)/invoices/actions";
+import { markInvoiceOverdueAction } from "@/app/(app)/invoices/actions";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -29,24 +25,24 @@ export function InvoiceStatusDropdown({
   onRequestCancel: () => void;
 }) {
   const router = useRouter();
-  const [pending, setPending] = useState<"sent" | "paid" | "overdue" | null>(null);
+  const [pending, setPending] = useState<"overdue" | null>(null);
 
   // `status` is the *effective* status: OVERDUE is either derived automatically
   // (SENT/PARTIALLY_PAID + a past due date + a remaining balance — see
   // getEffectiveInvoiceStatus) or set manually via Mark Overdue below. Either
   // way it carries the same permissions as the SENT/PARTIALLY_PAID it stands in for.
-  const canMarkSent = status === "DRAFT";
-  const canMarkPaid = status === "SENT" || status === "PARTIALLY_PAID" || status === "OVERDUE";
   const canMarkOverdue = status === "SENT" || status === "PARTIALLY_PAID";
   const canCancel = status === "SENT" || status === "PARTIALLY_PAID" || status === "OVERDUE";
 
-  // Nothing to change to (Paid/Cancelled are terminal here) — show a plain,
-  // non-interactive badge instead of a dropdown with nothing in it.
-  if (!canMarkSent && !canMarkPaid && !canMarkOverdue && !canCancel) {
+  // Nothing to change to (Draft/Paid/Cancelled are terminal here) — show a
+  // plain, non-interactive badge instead of a dropdown with nothing in it.
+  // Recording a payment (which Draft now also supports) happens from the
+  // invoice detail page, not this quick status menu.
+  if (!canMarkOverdue && !canCancel) {
     return <InvoiceStatusBadge status={status} />;
   }
 
-  async function run(action: () => Promise<{ error?: string }>, key: "sent" | "paid" | "overdue", message: string) {
+  async function run(action: () => Promise<{ error?: string }>, key: "overdue", message: string) {
     setPending(key);
     const result = await action();
     setPending(null);
@@ -67,22 +63,6 @@ export function InvoiceStatusDropdown({
         <ChevronDown className="h-3 w-3 text-muted-foreground" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start">
-        {canMarkSent && (
-          <DropdownMenuItem
-            disabled={pending !== null}
-            onClick={() => run(() => markInvoiceSentAction(invoiceId), "sent", "Invoice marked as sent.")}
-          >
-            Mark as Sent
-          </DropdownMenuItem>
-        )}
-        {canMarkPaid && (
-          <DropdownMenuItem
-            disabled={pending !== null}
-            onClick={() => run(() => markInvoicePaidAction(invoiceId), "paid", "Invoice marked as paid.")}
-          >
-            Mark as Paid
-          </DropdownMenuItem>
-        )}
         {canMarkOverdue && (
           <DropdownMenuItem
             disabled={pending !== null}

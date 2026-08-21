@@ -3,6 +3,7 @@ import { BusinessProfileForm } from "@/components/settings/business-profile-form
 import { BackupSettings } from "@/components/settings/backup-settings";
 import { PinSettings } from "@/components/settings/pin-settings";
 import { UpdateSettings } from "@/components/settings/update-settings";
+import { DangerZone } from "@/components/settings/danger-zone";
 
 export default async function SettingsPage() {
   const business = await requireCurrentBusiness();
@@ -20,8 +21,9 @@ export default async function SettingsPage() {
         }}
       />
       <BackupSettings />
-      <PinSettings hasPin={Boolean(business.pinHash)} />
+      <PinSettings hasPin={Boolean(business.pinHash)} hasRecoveryQuestion={Boolean(business.pinRecoveryQuestion)} />
       <UpdateSettings />
+      <DangerZone hasPin={Boolean(business.pinHash)} />
     </div>
   );
 }

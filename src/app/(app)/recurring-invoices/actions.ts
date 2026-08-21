@@ -9,6 +9,7 @@ import {
 } from "@/lib/validations/recurring-invoice";
 import { resolveOwnedProductIds } from "@/lib/resolve-owned-products";
 import { generateInvoiceFromTemplate } from "@/lib/recurring-invoice-generator";
+import { logActivity } from "@/lib/activity-log";
 
 export type RecurringInvoiceActionResult = { error?: string; recurringInvoiceId?: string };
 
@@ -58,6 +59,14 @@ export async function createRecurringInvoiceAction(
     select: { id: true },
   });
 
+  await logActivity(prisma, {
+    businessId: business.id,
+    action: "recurring_invoice.created",
+    entityType: "RecurringInvoice",
+    entityId: template.id,
+    summary: `Created recurring invoice template (${data.frequency.toLowerCase()})`,
+  });
+
   revalidatePath("/recurring-invoices");
   return { recurringInvoiceId: template.id };
 }
@@ -103,6 +112,14 @@ export async function updateRecurringInvoiceAction(
         items: { create: buildItemsData(data.items, ownedProductIds) },
       },
     });
+
+    await logActivity(tx, {
+      businessId: business.id,
+      action: "recurring_invoice.updated",
+      entityType: "RecurringInvoice",
+      entityId: templateId,
+      summary: "Updated recurring invoice template",
+    });
   });
 
   revalidatePath("/recurring-invoices");
@@ -117,14 +134,24 @@ async function setStatus(
 ): Promise<{ error?: string }> {
   const business = await requireCurrentBusiness();
 
-  const { count } = await prisma.recurringInvoice.updateMany({
+  const template = await prisma.recurringInvoice.findFirst({
     where: { id: templateId, businessId: business.id, status: { in: fromStatuses } },
-    data: { status: toStatus },
+    select: { id: true, status: true },
   });
-
-  if (count === 0) {
+  if (!template) {
     return { error: "This recurring invoice can't be updated." };
   }
+
+  await prisma.recurringInvoice.update({ where: { id: template.id }, data: { status: toStatus } });
+
+  await logActivity(prisma, {
+    businessId: business.id,
+    action: "recurring_invoice.status_changed",
+    entityType: "RecurringInvoice",
+    entityId: template.id,
+    summary: `${toStatus === "PAUSED" ? "Paused" : toStatus === "ACTIVE" ? "Resumed" : "Cancelled"} recurring invoice template`,
+    changes: [{ field: "status", from: template.status, to: toStatus }],
+  });
 
   revalidatePath("/recurring-invoices");
   revalidatePath(`/recurring-invoices/${templateId}`);
@@ -146,13 +173,23 @@ export async function cancelRecurringInvoiceAction(templateId: string) {
 export async function deleteRecurringInvoiceAction(templateId: string): Promise<{ error?: string }> {
   const business = await requireCurrentBusiness();
 
-  const { count } = await prisma.recurringInvoice.deleteMany({
+  const template = await prisma.recurringInvoice.findFirst({
     where: { id: templateId, businessId: business.id },
+    select: { id: true },
   });
-
-  if (count === 0) {
+  if (!template) {
     return { error: "Recurring invoice not found." };
   }
+
+  await prisma.recurringInvoice.delete({ where: { id: template.id } });
+
+  await logActivity(prisma, {
+    businessId: business.id,
+    action: "recurring_invoice.deleted",
+    entityType: "RecurringInvoice",
+    entityId: template.id,
+    summary: "Deleted recurring invoice template",
+  });
 
   revalidatePath("/recurring-invoices");
   return {};

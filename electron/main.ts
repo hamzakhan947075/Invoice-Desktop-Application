@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, Menu, Tray, nativeImage, ipcMain, type MenuItemConstructorOptions } from "electron";
+import { app, BrowserWindow, dialog, Menu, Tray, nativeImage, ipcMain, shell, type MenuItemConstructorOptions } from "electron";
 import { autoUpdater } from "electron-updater";
 import { spawn, type ChildProcess } from "child_process";
 import path from "path";
@@ -371,6 +371,26 @@ async function createWindow(url: string) {
       event.preventDefault();
       mainWindow?.hide();
     }
+  });
+
+  // Any navigation outside the app's own served pages (mailto: from Send
+  // Email, or a plain http(s) link) should open in the OS's default handler,
+  // not try to load inside this window.
+  mainWindow.webContents.on("will-navigate", (event, targetUrl) => {
+    if (!targetUrl.startsWith(baseUrl!)) {
+      event.preventDefault();
+      shell.openExternal(targetUrl);
+    }
+  });
+  mainWindow.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
+    // "View PDF" opens with target="_blank" against our own server — let
+    // Electron open that in a normal new window. Only hand off elsewhere
+    // (mailto:, external http(s) links) to the OS and block it here.
+    if (targetUrl.startsWith(baseUrl!)) {
+      return { action: "allow" };
+    }
+    shell.openExternal(targetUrl);
+    return { action: "deny" };
   });
 
   await mainWindow.loadURL(url);

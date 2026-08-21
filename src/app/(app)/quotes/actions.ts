@@ -9,6 +9,7 @@ import { generateQuoteNumber } from "@/lib/quote-number";
 import { generateInvoiceNumber } from "@/lib/invoice-number";
 import { resolveOwnedProductIds } from "@/lib/resolve-owned-products";
 import { getEffectiveQuoteStatus } from "@/lib/quote-status";
+import { logActivity } from "@/lib/activity-log";
 
 export type QuoteActionResult = { error?: string; quoteId?: string };
 
@@ -50,7 +51,7 @@ export async function createQuoteAction(input: QuoteInput): Promise<QuoteActionR
 
   const quote = await prisma.$transaction(async (tx) => {
     const quoteNumber = await generateQuoteNumber(tx, business.id, issueDate);
-    return tx.quote.create({
+    const created = await tx.quote.create({
       data: {
         businessId: business.id,
         customerId: data.customerId,
@@ -66,8 +67,18 @@ export async function createQuoteAction(input: QuoteInput): Promise<QuoteActionR
         notes: data.notes || null,
         items: { create: buildItemsData(data.items, ownedProductIds) },
       },
-      select: { id: true },
+      select: { id: true, quoteNumber: true },
     });
+
+    await logActivity(tx, {
+      businessId: business.id,
+      action: "quote.created",
+      entityType: "Quote",
+      entityId: created.id,
+      summary: `Created quote ${created.quoteNumber} for ${totals.total.toFixed(2)} ${data.currency}`,
+    });
+
+    return created;
   });
 
   revalidatePath("/quotes");
@@ -97,8 +108,16 @@ export async function updateQuoteAction(
 
   try {
     await prisma.$transaction(async (tx) => {
-      const { count } = await tx.quote.updateMany({
+      const existing = await tx.quote.findFirst({
         where: { id: quoteId, businessId: business.id, status: "DRAFT" },
+        select: { quoteNumber: true },
+      });
+      if (!existing) {
+        throw new QuoteActionError("Only draft quotes can be edited.");
+      }
+
+      await tx.quote.update({
+        where: { id: quoteId },
         data: {
           customerId: data.customerId,
           issueDate: new Date(data.issueDate),
@@ -111,13 +130,18 @@ export async function updateQuoteAction(
           notes: data.notes || null,
         },
       });
-      if (count === 0) {
-        throw new QuoteActionError("Only draft quotes can be edited.");
-      }
 
       await tx.quoteItem.deleteMany({ where: { quoteId } });
       await tx.quoteItem.createMany({
         data: buildItemsData(data.items, ownedProductIds).map((item) => ({ ...item, quoteId })),
+      });
+
+      await logActivity(tx, {
+        businessId: business.id,
+        action: "quote.updated",
+        entityType: "Quote",
+        entityId: quoteId,
+        summary: `Updated quote ${existing.quoteNumber}`,
       });
     });
   } catch (error) {
@@ -133,10 +157,21 @@ export async function updateQuoteAction(
 export async function deleteDraftQuoteAction(quoteId: string): Promise<{ error?: string }> {
   const business = await requireCurrentBusiness();
 
-  const { count } = await prisma.quote.deleteMany({
+  const quote = await prisma.quote.findFirst({
     where: { id: quoteId, businessId: business.id, status: "DRAFT" },
+    select: { id: true, quoteNumber: true },
   });
-  if (count === 0) return { error: "Only draft quotes can be deleted." };
+  if (!quote) return { error: "Only draft quotes can be deleted." };
+
+  await prisma.quote.delete({ where: { id: quote.id } });
+
+  await logActivity(prisma, {
+    businessId: business.id,
+    action: "quote.deleted",
+    entityType: "Quote",
+    entityId: quote.id,
+    summary: `Deleted draft quote ${quote.quoteNumber}`,
+  });
 
   revalidatePath("/quotes");
   return {};
@@ -149,11 +184,22 @@ async function setQuoteStatus(
 ): Promise<{ error?: string }> {
   const business = await requireCurrentBusiness();
 
-  const { count } = await prisma.quote.updateMany({
+  const quote = await prisma.quote.findFirst({
     where: { id: quoteId, businessId: business.id, status: { in: fromStatuses } },
-    data: { status: toStatus },
+    select: { id: true, quoteNumber: true, status: true },
   });
-  if (count === 0) return { error: "This quote can't be updated." };
+  if (!quote) return { error: "This quote can't be updated." };
+
+  await prisma.quote.update({ where: { id: quote.id }, data: { status: toStatus } });
+
+  await logActivity(prisma, {
+    businessId: business.id,
+    action: "quote.status_changed",
+    entityType: "Quote",
+    entityId: quote.id,
+    summary: `Marked quote ${quote.quoteNumber} as ${toStatus[0]}${toStatus.slice(1).toLowerCase()}`,
+    changes: [{ field: "status", from: quote.status, to: toStatus }],
+  });
 
   revalidatePath("/quotes");
   revalidatePath(`/quotes/${quoteId}`);
@@ -240,10 +286,19 @@ export async function convertQuoteToInvoiceAction(
             })),
           },
         },
-        select: { id: true },
+        select: { id: true, invoiceNumber: true },
       });
 
       await tx.quote.update({ where: { id: quoteId }, data: { convertedInvoiceId: created.id } });
+
+      await logActivity(tx, {
+        businessId: business.id,
+        action: "quote.converted",
+        entityType: "Quote",
+        entityId: quoteId,
+        summary: `Converted quote ${quote.quoteNumber} to invoice ${created.invoiceNumber}`,
+      });
+
       return created;
     });
 

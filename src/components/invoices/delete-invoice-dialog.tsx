@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { deleteDraftInvoiceAction } from "@/app/(app)/invoices/actions";
+import { deleteInvoiceAction } from "@/app/(app)/invoices/actions";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -18,11 +18,14 @@ export function DeleteInvoiceDialog({
   onOpenChange,
   invoiceId,
   invoiceNumber,
+  onDeleted,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   invoiceId: string;
   invoiceNumber: string;
+  /** Called after the invoice is actually deleted, once the dialog has already closed itself. */
+  onDeleted?: () => void;
 }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,11 +33,14 @@ export function DeleteInvoiceDialog({
   async function handleDelete() {
     setPending(true);
     setError(null);
-    // On success this throws Next's internal redirect signal and never returns —
-    // reaching a returned value here means deletion was rejected server-side.
-    const result = await deleteDraftInvoiceAction(invoiceId);
-    setError(result.error ?? "Something went wrong.");
+    const result = await deleteInvoiceAction(invoiceId);
     setPending(false);
+    if (result.error) {
+      setError(result.error);
+      return;
+    }
+    onOpenChange(false);
+    onDeleted?.();
   }
 
   return (
@@ -43,7 +49,8 @@ export function DeleteInvoiceDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>Delete {invoiceNumber}?</AlertDialogTitle>
           <AlertDialogDescription>
-            This will permanently delete this draft invoice. This action cannot be undone.
+            This moves the invoice to Trash, where it can be restored. Purging it permanently from Trash also
+            removes any payments and credit notes recorded against it.
           </AlertDialogDescription>
         </AlertDialogHeader>
         {error && <p className="text-sm text-destructive">{error}</p>}

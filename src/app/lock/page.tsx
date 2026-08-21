@@ -27,7 +27,7 @@ export default async function LockPage({
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
-      <LockForm next={nextPath} />
+      <LockForm next={nextPath} recoveryQuestion={business.pinRecoveryQuestion} />
     </div>
   );
 }

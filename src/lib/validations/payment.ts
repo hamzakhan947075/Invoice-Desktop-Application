@@ -31,3 +31,11 @@ export const paymentSchema = z.object({
 });
 
 export type PaymentInput = z.infer<typeof paymentSchema>;
+
+// Editing an existing payment intentionally excludes `amount` — changing it
+// would need to recompute the invoice's amountPaid/balanceDue/status, which
+// is a different (and riskier) operation than fixing the recorded method,
+// date, reference, or notes.
+export const paymentEditSchema = paymentSchema.omit({ amount: true });
+
+export type PaymentEditInput = z.infer<typeof paymentEditSchema>;

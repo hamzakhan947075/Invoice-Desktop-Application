@@ -101,6 +101,12 @@ model Business {
   // deterrent for a shared PC, not real encryption-at-rest for the db file.
   pinHash String?
 
+  // "Forgot PIN?" recovery — same threat model as the PIN itself, so a
+  // security question with a locally-hashed answer is an acceptable
+  // fallback. Set alongside the PIN; null means no recovery path exists.
+  pinRecoveryQuestion   String?
+  pinRecoveryAnswerHash String?
+
   customers         Customer[]
   products          Product[]
   invoices          Invoice[]
@@ -110,6 +116,7 @@ model Business {
   creditNotes       CreditNote[]
   expenses          Expense[]
   stockMovements    StockMovement[]
+  activityLogs      ActivityLog[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -194,6 +201,12 @@ model Invoice {
   balanceDue Decimal @default(0)
 
   notes String?
+
+  // Set (and re-set) when the user hands the invoice off to their email
+  // client via the Send/Resend Email button — see SendInvoiceEmailButton.
+  // This is "the user clicked send," not delivery confirmation: the app
+  // never touches the actual email, so it can't know whether it was sent.
+  lastEmailedAt DateTime?
 
   businessId String
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
@@ -445,4 +458,28 @@ model StockMovement {
   @@index([productId])
   @@index([businessId])
   @@map("stock_movements")
+}
+
+// Phase 21 — an audit trail of user actions across the app: what happened,
+// to what, and when. Purely additive/append-only — nothing here is ever
+// updated or deleted by the app itself, so it isn't soft-deleted like the
+// entities it describes.
+model ActivityLog {
+  id         String  @id @default(cuid())
+  // Dot-separated verb, e.g. "invoice.created", "invoice.payment_recorded" — grouped by entityType for the Logs page's filter.
+  action     String
+  entityType String
+  entityId   String?
+  summary    String
+  // JSON-encoded array of { field, from, to }, or null when not applicable (e.g. create/delete).
+  changes    String?
+
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([businessId, createdAt])
+  @@index([businessId, entityType])
+  @@map("activity_logs")
 }

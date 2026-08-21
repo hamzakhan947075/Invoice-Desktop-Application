@@ -27,7 +27,7 @@ export default async function CustomersPage({
         : {}),
     },
     include: {
-      invoices: { select: { balanceDue: true } },
+      invoices: { where: { deletedAt: null }, select: { balanceDue: true } },
     },
     orderBy: { createdAt: "desc" },
   });

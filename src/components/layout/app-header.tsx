@@ -2,7 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { Settings } from "lucide-react";
+import { Settings, Search } from "lucide-react";
 import { MobileSidebar } from "@/components/layout/mobile-sidebar";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
@@ -15,13 +15,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { navItems } from "@/lib/nav-items";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
-
-function initialsFor(name: string) {
-  const parts = name.trim().split(/\s+/);
-  const first = parts[0]?.[0] ?? "";
-  const last = parts.length > 1 ? parts[parts.length - 1]?.[0] ?? "" : "";
-  return (first + last).toUpperCase() || "?";
-}
+import { initialsFor } from "@/lib/format";
 
 export function AppHeader({ businessName }: { businessName: string }) {
   const pathname = usePathname();
@@ -37,7 +31,20 @@ export function AppHeader({ businessName }: { businessName: string }) {
         <h1 className="font-heading text-lg font-semibold">{currentPage}</h1>
       </div>
 
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => window.dispatchEvent(new Event("invoiceflow:open-command-palette"))}
+          className="hidden items-center gap-2 rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:flex"
+        >
+          <Search className="h-3.5 w-3.5" />
+          Search
+          <kbd className="ml-2 rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium">
+            {typeof navigator !== "undefined" && navigator.platform.toLowerCase().includes("mac")
+              ? "⌘K"
+              : "Ctrl+K"}
+          </kbd>
+        </button>
         <ThemeToggle />
         <DropdownMenu>
           <DropdownMenuTrigger className="flex items-center gap-2 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring">
