@@ -15,6 +15,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "build:bootstrap-css": "sass src/styles/bootstrap-dashboard.scss src/styles/bootstrap-dashboard.css --no-source-map --quiet-deps --load-path=node_modules",
+    "postinstall": "prisma generate && prisma migrate deploy && npm run build:bootstrap-css",
     "electron:dev:next": "next dev -p 5175",
     "electron:dev:main": "tsup electron/main.ts electron/preload.ts --outDir dist-electron --format cjs --external electron --watch --onSuccess \"electron .\"",
     "electron:dev": "concurrently -k \"npm:electron:dev:next\" \"wait-on http://127.0.0.1:5175 && npm run electron:dev:main\"",

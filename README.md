@@ -72,13 +72,7 @@ Everything else — invoices, quotes, credit notes, expenses, inventory, recurri
 
 No database server, no `.env` secrets beyond an optional cron token — SQLite is a plain file.
 
-### 1. Install dependencies
-
-```bash
-npm install
-```
-
-### 2. Configure environment variables
+### 1. Configure environment variables
 
 ```bash
 cp .env.example .env
@@ -89,15 +83,23 @@ cp .env.example .env
 | `DATABASE_URL` | SQLite file path, e.g. `file:./dev.db` (default) |
 | `CRON_SECRET` | Authorizes calls to `/api/cron/recurring-invoices`, checked once automatically on every app launch |
 
-### 3. Set up the database
+Do this **before** `npm install` — the Prisma CLI (run automatically by `postinstall`, see below) needs `DATABASE_URL` to already be resolvable, and fails immediately if `.env` doesn't exist yet.
+
+### 2. Install dependencies
 
 ```bash
-npx prisma generate
-npx prisma migrate dev
+npm install
+```
+
+`postinstall` automatically runs `prisma generate`, applies any pending migrations (`prisma migrate deploy`), and compiles the dashboard's scoped Bootstrap SCSS to CSS (`npm run build:bootstrap-css` — see [Architecture & Engineering Notes](#architecture--engineering-notes) for why that's a separate precompile step instead of a normal import). Safe to re-run any time; all three are no-ops if already up to date.
+
+### 3. Seed demo data (optional)
+
+```bash
 npx tsx prisma/seed.ts
 ```
 
-This creates the schema and seeds one demo business with customers, products, and invoices in different states (paid, partially paid, overdue).
+Seeds one demo business with customers, products, and invoices in different states (paid, partially paid, overdue). Skip this if you'd rather start with a blank business — one is auto-created on first launch either way.
 
 ### 4. Run in the browser (fastest iteration loop)
 
@@ -205,6 +207,14 @@ prisma/
 - **Credit notes** reduce `balanceDue` directly, never `total` (which stays the historical billed amount), flipping the invoice to `PAID` if the credit fully offsets the balance.
 - **Inventory is manual by design** — `Product.stockQuantity` only changes through an explicit "Adjust Stock" action, which always creates a `StockMovement` audit row in the same transaction. Invoicing never touches it.
 - **Recurring invoices**: `electron/main.ts` calls the existing `/api/cron/recurring-invoices` route (with `CRON_SECRET`) once after the server responds on every app launch — the same route the web app's Vercel Cron used, just triggered differently.
+
+</details>
+
+<details>
+<summary><b>Dashboard: a scoped Bootstrap import, precompiled (click to expand)</b></summary>
+
+- The rest of the app is Tailwind + shadcn everywhere; the Dashboard alone also uses real Bootstrap (`.card`, `.badge`, `.btn`, `.progress`) for its stat cards. `src/styles/bootstrap-dashboard.scss` deliberately imports only those components — never `reboot`/`type`/`utilities` — because Tailwind already owns identically-named utility classes (`p-3`, `shadow-sm`, `container`, ...) app-wide, and loading Bootstrap's versions of those globally would silently break spacing/layout on every other page depending on which stylesheet happened to load last.
+- That `.scss` file is **not** compiled by Next's own build — Turbopack's Sass loader can't resolve Bootstrap 5.3's own internal `@import "variables-dark"` inside its `_variables.scss` (a bare relative import, added as a v5.3 backward-compat shim). The Dart Sass CLI resolves it fine, so it's precompiled to `src/styles/bootstrap-dashboard.css` (the file the dashboard page actually imports) via `npm run build:bootstrap-css`, which runs automatically post-install and must be re-run manually after editing the `.scss` source.
 
 </details>
 
